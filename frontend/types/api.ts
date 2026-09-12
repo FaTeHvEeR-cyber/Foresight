@@ -20,6 +20,13 @@ export interface ColumnDescriptor {
   name: string;
   inferredType: "numeric" | "categorical" | "datetime" | "text" | "boolean";
   nullCount: number;
+  nullPercentage?: number;
+}
+
+export interface ColumnNullProfile {
+  nullCount: number;
+  nullPercentage: number;
+  totalRows: number;
 }
 
 export interface UploadResponse {
@@ -31,6 +38,7 @@ export interface UploadResponse {
   rowCount?: number;
   columnCount?: number;
   columns?: ColumnDescriptor[];
+  rawNullProfile?: Record<string, ColumnNullProfile>;
   memoryUsageBytes: number;
 }
 

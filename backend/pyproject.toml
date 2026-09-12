@@ -1,0 +1,16 @@
+[project]
+name = "foresight-backend"
+version = "0.1.0"
+description = "FastAPI backend for Foresight analytics platform"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra -q --import-mode=importlib"
+testpaths = [
+    "tests",
+]
+pythonpath = [
+    ".",
+    "app"
+]
