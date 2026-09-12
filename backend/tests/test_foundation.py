@@ -1,7 +1,9 @@
 """Test foundational setup for Phase 2: settings, models, and main app."""
 
 from starlette.testclient import TestClient
+# pyrefly: ignore [missing-import]
 from config.settings import settings
+# pyrefly: ignore [missing-import]
 from src.models import (
     ColumnDescriptor,
     ColumnNullMetric,

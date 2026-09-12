@@ -133,10 +133,10 @@ def test_downstream_modeling_algorithms_succeed():
 
     # Select numeric feature columns (including the was_missing indicators)
     feature_cols = [c for c in imputed.columns if c != "target"]
-    X = imputed[feature_cols].values
-    y = imputed["target"].values
+    assert not imputed[feature_cols].isna().any().any(), "Feature matrix contains NaNs!"
 
-    assert not np.isnan(X).any(), "Feature matrix contains NaNs!"
+    X = imputed[feature_cols].astype(float).values
+    y = imputed["target"].values
 
     # 1. Ridge regression
     ridge = Ridge()

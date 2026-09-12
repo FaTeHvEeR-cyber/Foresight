@@ -28,3 +28,12 @@ pythonpath = [
     "src",
     "app",
 ]
+
+[tool.pyright]
+extraPaths = [
+    ".",
+    "src",
+    "app",
+    "config",
+]
+
