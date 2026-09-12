@@ -4,7 +4,7 @@ import { ShieldCheck, Cpu, HardDrive } from "lucide-react";
 const trustItems = [
   { label: "No account required", icon: ShieldCheck },
   { label: "In-memory processing", icon: Cpu },
-  { label: "Max 25MB file size", icon: HardDrive },
+  { label: "Max 50MB file size", icon: HardDrive },
 ];
 
 export function TrustStrip() {

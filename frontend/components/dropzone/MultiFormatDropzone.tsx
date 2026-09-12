@@ -5,7 +5,7 @@ import { UploadCloud, AlertCircle } from "lucide-react";
 import { StagedFileCard } from "./StagedFileCard";
 import type { DetectedFileKind, DetectedFormat } from "@/types/api";
 
-export const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25 MB hard limit
+export const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50MB, matches backend
 
 export const ACCEPTED_EXTENSIONS = [
   "csv",
@@ -95,10 +95,10 @@ export function MultiFormatDropzone({
     (file: File) => {
       setErrorMessage(null);
 
-      // 1. Enforce 25MB hard size limit client-side
+      // 1. Enforce 50MB hard size limit client-side
       if (file.size > MAX_FILE_SIZE_BYTES) {
         const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
-        const err = `File exceeds the 25MB limit (${sizeMb} MB). Foresight processes files up to 25MB.`;
+        const err = `File exceeds the 50MB limit (${sizeMb} MB). Foresight processes files up to 50MB.`;
         setErrorMessage(err);
         onError?.(err);
         return;
@@ -273,7 +273,7 @@ export function MultiFormatDropzone({
               <span className="text-blue-600 underline underline-offset-2">browse</span>
             </p>
             <p className="text-xs md:text-sm text-slate-500">
-              Max file size 25MB • Up to 1 file per analysis
+              Max file size 50MB • Up to 1 file per analysis
             </p>
           </div>
 
