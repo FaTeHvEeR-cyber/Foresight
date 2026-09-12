@@ -11,7 +11,7 @@ Implements the POST /upload endpoint with:
 """
 
 import io
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 import uuid
 
 from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile, status
@@ -23,6 +23,8 @@ from src.memory.lifecycle import ephemeral_processing
 from src.models import (
     ColumnDescriptor,
     ColumnNullMetric,
+    DetectedFileKind,
+    DetectedFormat,
     RawNullProfile,
     UploadResponse,
 )
@@ -140,13 +142,13 @@ async def upload(file: Optional[UploadFile] = File(None)):
         # 3. Classify detectedKind ("tabular" | "document" | "mixed") based on extension
         ext = filename.rsplit(".", 1)[-1].lower().strip() if "." in filename else ""
         if ext in TABULAR_EXTENSIONS:
-            detected_kind = "tabular"
+            detected_kind: DetectedFileKind = "tabular"
         elif ext in DOCUMENT_EXTENSIONS:
-            detected_kind = "document"
+            detected_kind: DetectedFileKind = "document"
         else:
-            detected_kind = "mixed"
+            detected_kind: DetectedFileKind = "mixed"
 
-        detected_format = ext
+        detected_format: DetectedFormat = cast(DetectedFormat, ext)
         file_id = f"f_{uuid.uuid4().hex[:12]}"
 
         # 4. For tabular: parse_tabular → sanitize_tabular_cells → compute_raw_null_profile → impute_for_modeling
