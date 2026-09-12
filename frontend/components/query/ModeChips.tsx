@@ -1,88 +1,96 @@
 "use client";
 
 /**
- * ============================================================================
- * COSMETIC-ONLY COMPONENT
- * ============================================================================
- * Note: RepresentationModePreference is a client-side UI preference switch.
- * Per the parked routing architecture, this component is COSMETIC-ONLY and is
- * NOT wired to backend routing. It toggles local display intent between Auto,
- * Dashboard, and Report modes without altering backend contracts.
- * ============================================================================
+ * COSMETIC-ONLY COMPONENT (Phase 1)
+ *
+ * no backend intent-classification or routing logic exists yet; any LLM-driven
+ * schema routing is a parked, unevaluated future direction; these values are
+ * captured in local state only and will just be passed as plain fields alongside
+ * the upload once Phase 2 exists. Do not wire them to any API call.
  */
 
 import React from "react";
-import { LayoutDashboard, FileText, Wand2 } from "lucide-react";
 import type { RepresentationModePreference } from "@/types/schema";
 
 export interface ModeChipsProps {
-  selectedMode: RepresentationModePreference;
-  onModeChange: (mode: RepresentationModePreference) => void;
+  value?: RepresentationModePreference;
+  onChange?: (value: RepresentationModePreference) => void;
+  // Backwards-compatibility props
+  selectedMode?: RepresentationModePreference;
+  onModeChange?: (mode: RepresentationModePreference) => void;
   disabled?: boolean;
+  className?: string;
 }
 
 interface ModeOption {
   id: RepresentationModePreference;
   label: string;
-  description: string;
-  icon: React.ComponentType<{ className?: string }>;
 }
 
-const MODES: ModeOption[] = [
-  {
-    id: "auto",
-    label: "Auto Resolver",
-    description: "Rule-based tab routing based on uploaded file type",
-    icon: Wand2,
-  },
-  {
-    id: "dashboard",
-    label: "Dashboard Mode",
-    description: "Visual charts, projections, and scatter clusters",
-    icon: LayoutDashboard,
-  },
-  {
-    id: "report",
-    label: "Executive Report",
-    description: "Narrative synthesis, key takeaways, and tables",
-    icon: FileText,
-  },
-];
+const MODES: readonly ModeOption[] = [
+  { id: "auto", label: "Auto-Detect (Default)" },
+  { id: "dashboard", label: "Visual Dashboard" },
+  { id: "report", label: "Executive Report" },
+] as const;
 
 export function ModeChips({
+  value,
+  onChange,
   selectedMode,
   onModeChange,
   disabled = false,
+  className = "",
 }: ModeChipsProps) {
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <span className="text-xs text-slate-500 font-medium mr-1 select-none">
-        Representation Mode (Cosmetic):
-      </span>
+  const activeMode = value ?? selectedMode ?? "auto";
 
-      {MODES.map((mode) => {
-        const isSelected = selectedMode === mode.id;
-        const Icon = mode.icon;
+  const handleSelect = (mode: RepresentationModePreference) => {
+    if (disabled) return;
+    onChange?.(mode);
+    onModeChange?.(mode);
+  };
+
+  const handleKeyDown = (
+    e: React.KeyboardEvent<HTMLButtonElement>,
+    index: number
+  ) => {
+    if (disabled) return;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      e.preventDefault();
+      const nextIndex = (index + 1) % MODES.length;
+      handleSelect(MODES[nextIndex].id);
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const prevIndex = (index - 1 + MODES.length) % MODES.length;
+      handleSelect(MODES[prevIndex].id);
+    }
+  };
+
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Representation Mode"
+      className={`inline-flex items-center p-1 rounded-xl bg-slate-900/80 border border-slate-700/80 gap-1 ${className}`}
+    >
+      {MODES.map((mode, index) => {
+        const isSelected = activeMode === mode.id;
 
         return (
           <button
             key={mode.id}
             type="button"
-            onClick={() => onModeChange(mode.id)}
+            role="radio"
+            aria-checked={isSelected}
+            tabIndex={isSelected ? 0 : -1}
+            onClick={() => handleSelect(mode.id)}
+            onKeyDown={(e) => handleKeyDown(e, index)}
             disabled={disabled}
-            title={`${mode.label}: ${mode.description} (Cosmetic selector)`}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 border select-none ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:opacity-50 disabled:cursor-not-allowed ${
               isSelected
-                ? "bg-blue-600/20 text-blue-300 border-blue-500/60 shadow-[0_0_12px_rgba(59,130,246,0.2)]"
-                : "bg-slate-900/60 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-200"
-            } ${disabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
+                ? "bg-white text-slate-900 shadow font-semibold"
+                : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-800/40"
+            }`}
           >
-            <Icon
-              className={`w-3.5 h-3.5 ${
-                isSelected ? "text-blue-400" : "text-slate-500"
-              }`}
-            />
-            <span>{mode.label}</span>
+            {mode.label}
           </button>
         );
       })}

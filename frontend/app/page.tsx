@@ -6,7 +6,6 @@ import { Footer } from "@/components/layout/Footer";
 import { TrustStrip } from "@/components/layout/TrustStrip";
 import { FeatureCards } from "@/components/layout/FeatureCards";
 import { MultiFormatDropzone } from "@/components/dropzone/MultiFormatDropzone";
-import { StagedFileCard } from "@/components/dropzone/StagedFileCard";
 import { QueryBar } from "@/components/query/QueryBar";
 import { ModeChips } from "@/components/query/ModeChips";
 
@@ -48,7 +47,7 @@ export default function HomePage() {
 
   // Local state for cosmetic query & representation mode
   const [modePreference, setModePreference] = useState<RepresentationModePreference>("auto");
-  const [queryLog, setQueryLog] = useState<string | null>(null);
+  const [queryText, setQueryText] = useState("");
 
   // Analysis & Processing State
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -238,11 +237,11 @@ export default function HomePage() {
         {/* Cosmetic Exploratory Layer: QueryBar & ModeChips */}
         <section className="max-w-4xl mx-auto space-y-3.5">
           <QueryBar
-            onQuerySubmit={(q) => setQueryLog(q)}
-            placeholder="Type a natural language exploration query (Cosmetic UI preview)..."
+            value={queryText}
+            onChange={setQueryText}
           />
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <ModeChips selectedMode={modePreference} onModeChange={setModePreference} />
+            <ModeChips value={modePreference} onChange={setModePreference} />
 
             {/* Quick Demo Preloads */}
             <div className="flex items-center gap-2 text-xs">
@@ -267,19 +266,22 @@ export default function HomePage() {
 
         {/* Ingestion & Dropzone Area */}
         <section className="max-w-4xl mx-auto space-y-4">
-          {!stagedFile ? (
-            <MultiFormatDropzone onFileAccepted={handleFileAccepted} />
-          ) : (
-            <StagedFileCard
-              file={stagedFile}
-              detectedKind={detectedKind}
-              detectedFormat={detectedFormat}
-              isAnalyzing={isAnalyzing}
-              isAnalyzed={isAnalyzed}
-              onRemove={handleRemoveFile}
-              onAnalyze={handleAnalyze}
-            />
-          )}
+          <MultiFormatDropzone
+            stagedFile={stagedFile}
+            onFileStaged={(file) => {
+              const ext = file.name.split(".").pop()?.toLowerCase() || "";
+              const kind = ["csv", "tsv", "xlsx", "xls", "parquet"].includes(ext)
+                ? "tabular"
+                : "document";
+              handleFileAccepted(file, {
+                detectedKind: kind,
+                detectedFormat: ext as DetectedFormat,
+              });
+            }}
+            onFileCleared={handleRemoveFile}
+            onAnalyze={handleAnalyze}
+            isAnalyzing={isAnalyzing}
+          />
         </section>
 
         {/* Dynamic Tabs & Results Preview Area */}
