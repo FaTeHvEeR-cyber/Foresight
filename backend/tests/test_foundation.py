@@ -15,7 +15,7 @@ from main import app
 
 def test_settings_configuration():
     """Verify settings defaults and required properties."""
-    assert settings.MAX_FILE_SIZE_MB == 25
+    assert settings.MAX_FILE_SIZE_MB == 50
     assert settings.ENABLE_RATE_LIMITING is False
     assert settings.RATE_LIMIT_REQUESTS_PER_MINUTE == 30
     assert "csv" in settings.ALLOWED_EXTENSIONS
