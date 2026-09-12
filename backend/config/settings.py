@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     # Guardrails
-    MAX_FILE_SIZE_MB: int = 25
+    MAX_FILE_SIZE_MB: int = 50
 
     # Allowed Extensions Whitelist
     ALLOWED_EXTENSIONS: Set[str] = {

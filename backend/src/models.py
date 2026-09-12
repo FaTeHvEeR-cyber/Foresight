@@ -38,6 +38,8 @@ class RawNullProfile(BaseModel):
 
     Kept strictly separate from any imputed data structure.
     """
+    model_config = {"extra": "allow"}
+
     columnName: Optional[str] = None
     nullCount: Optional[int] = None
     nullPercentage: Optional[float] = None
@@ -54,5 +56,5 @@ class UploadResponse(BaseModel):
     rowCount: Optional[int] = None
     columnCount: Optional[int] = None
     columns: Optional[List[ColumnDescriptor]] = None
-    rawNullProfile: Optional[Union[RawNullProfile, List[RawNullProfile], List[ColumnNullMetric], Dict[str, Any]]] = None
+    rawNullProfile: Optional[Union[Dict[str, Any], RawNullProfile, List[RawNullProfile], List[ColumnNullMetric]]] = None
     memoryUsageBytes: int
