@@ -195,21 +195,12 @@ async def upload(file: Optional[UploadFile] = File(None)):
             # Populate raw null profile dictionary (for UI reporting and warnings)
             raw_null_profile_payload = {
                 (p.columnName or str(col)): {
-                    "columnName": (p.columnName or str(col)),
                     "nullCount": p.nullCount if p.nullCount is not None else 0,
                     "nullPercentage": p.nullPercentage if p.nullPercentage is not None else 0.0,
                     "totalRows": p.totalRows if p.totalRows is not None else row_count,
                 }
                 for col, p in zip(sanitized_df.columns, raw_null_profile_list)
             }
-            raw_null_profile_payload["columns"] = [
-                {
-                    "columnName": p.columnName or str(col),
-                    "nullCount": p.nullCount if p.nullCount is not None else 0,
-                    "nullPercentage": p.nullPercentage if p.nullPercentage is not None else 0.0,
-                }
-                for col, p in zip(sanitized_df.columns, raw_null_profile_list)
-            ]
 
         # 5. For document: parse_document
         else:
