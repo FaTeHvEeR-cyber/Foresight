@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from config.settings import settings
+from src.memory.lifecycle import ephemeral_processing
 
 
 class RateLimiterPlaceholderMiddleware(BaseHTTPMiddleware):
@@ -54,4 +55,5 @@ async def health():
 @app.post("/upload")
 async def upload():
     """Empty POST /upload route stub to be filled in a later prompt."""
-    return {"message": "Upload stub"}
+    with ephemeral_processing():
+        return {"message": "Upload stub"}
