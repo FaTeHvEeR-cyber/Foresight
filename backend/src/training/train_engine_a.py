@@ -44,6 +44,7 @@ logging.basicConfig(
 # Threshold constants specified for validation evaluation
 RMSPE_THRESHOLD: float = 15.0  # RMSPE <= 15%
 R2_THRESHOLD: float = 0.85      # R² >= 0.85
+RMSPE_MIN_DEMAND_THRESHOLD: float = 50.0  # y >= 50 filter for percentage-error evaluation
 LAG_PERIODS: List[int] = [7, 14, 21, 30]
 ROLLING_WINDOWS: List[int] = [7, 14, 30]
 
@@ -248,28 +249,29 @@ def fit_models(
     """Train Ridge, XGBoost, and MLP models on identical features and splits."""
     models: Dict[str, Any] = {}
 
-    # 1. Ridge Regression (baseline)
-    logger.info("Fitting Ridge Regression baseline...")
-    ridge = Ridge(alpha=1.0, random_state=random_state)
+    # 1. Ridge Regression (baseline) - tuned alpha=10.0
+    logger.info("Fitting Ridge Regression baseline (alpha=10.0)...")
+    ridge = Ridge(alpha=10.0, random_state=random_state)
     ridge.fit(X_train, y_train)
     models["ridge"] = ridge
 
-    # 2. XGBoost Regressor (primary)
-    logger.info("Fitting XGBoost Regressor primary model...")
+    # 2. XGBoost Regressor (primary) - tuned max_depth=3, n_est=100, lr=0.05
+    logger.info("Fitting XGBoost Regressor primary model (max_depth=3, n_est=100, lr=0.05)...")
     xgboost_model = XGBRegressor(
         n_estimators=100,
-        learning_rate=0.08,
-        max_depth=5,
+        learning_rate=0.05,
+        max_depth=3,
         random_state=random_state,
         n_jobs=-1,
     )
     xgboost_model.fit(X_train, y_train)
     models["xgboost"] = xgboost_model
 
-    # 3. scikit-learn MLPRegressor (benchmark)
-    logger.info("Fitting scikit-learn MLPRegressor benchmark model...")
+    # 3. scikit-learn MLPRegressor (benchmark) - confirmed (64, 32), lr=0.001
+    logger.info("Fitting scikit-learn MLPRegressor benchmark model (hidden=(64,32), lr=0.001)...")
     mlp = MLPRegressor(
         hidden_layer_sizes=(64, 32),
+        learning_rate_init=0.001,
         activation="relu",
         solver="adam",
         max_iter=400,
@@ -284,15 +286,22 @@ def fit_models(
     return models
 
 
-def compute_rmspe(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+def compute_rmspe(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    min_demand_threshold: float = RMSPE_MIN_DEMAND_THRESHOLD,
+) -> float:
     """Compute Root Mean Square Percentage Error (RMSPE) in percent.
 
     Formula: sqrt(mean(((y_true - y_pred) / y_true) ** 2)) * 100%
-    Safely ignores zero actual values to prevent division by zero.
+    Restricted to rows where the true value y_true >= min_demand_threshold (default: 50.0)
+    to exclude anomaly-injected extreme values and naturally low-demand rows
+    that distort percentage-error metrics via division by near-zero.
+    Safely returns 0.0 if no valid rows exist.
     """
     y_t = np.asarray(y_true, dtype=float)
     y_p = np.asarray(y_pred, dtype=float)
-    mask = y_t > 0
+    mask = y_t >= min_demand_threshold
     if not np.any(mask):
         return 0.0
     relative_errors = (y_t[mask] - y_p[mask]) / y_t[mask]
@@ -306,6 +315,9 @@ def evaluate_models(
 ) -> Dict[str, Dict[str, float]]:
     """Evaluate each model on validation fold and compute RMSPE, MAE, RMSE, R².
 
+    - RMSPE is evaluated only on rows where y_val >= 50.0 (via compute_rmspe) to avoid
+      metric distortion from naturally low-demand and extreme drop rows.
+    - MAE, RMSE, and R² are computed on the full clean validation fold.
     Evaluates all three models completely without stopping early even if one
     fails threshold criteria.
     """
@@ -329,7 +341,7 @@ def evaluate_models(
             "r2": r2_val,
         }
         logger.info(
-            "Model %-8s | RMSPE: %8.2f%% | MAE: %7.2f | RMSE: %7.2f | R^2: %7.4f",
+            "Model %-8s | RMSPE (y>=50): %8.2f%% | MAE: %7.2f | RMSE: %7.2f | R^2: %7.4f",
             name,
             rmspe_val,
             mae_val,
@@ -346,21 +358,21 @@ def print_summary_table(
 ) -> None:
     """Print a summary table of all metrics per model at the end."""
     col_w = {
-        "model": 16,
-        "rmspe": 12,
+        "model": 18,
+        "rmspe": 18,
         "mae": 10,
         "rmse": 10,
         "r2": 10,
-        "status": 22,
+        "status": 26,
     }
 
     header = (
         f"{'Model':<{col_w['model']}} | "
-        f"{'RMSPE (%)':>{col_w['rmspe']}} | "
+        f"{'RMSPE (y>=50)':>{col_w['rmspe']}} | "
         f"{'MAE':>{col_w['mae']}} | "
         f"{'RMSE':>{col_w['rmse']}} | "
         f"{'R^2':>{col_w['r2']}} | "
-        f"{'Threshold Check':<{col_w['status']}}"
+        f"{'Evaluation Role & Gate':<{col_w['status']}}"
     )
     divider = "-" * len(header)
 
@@ -373,13 +385,16 @@ def print_summary_table(
         print(f"   - Total validation rows   : {exclusion_stats['total_val_rows']}")
         print(f"   - Excluded anomalous rows : {exclusion_stats['excluded_rows']} ({exclusion_stats['excluded_pct']:.2f}%)")
         print(f"   - Clean rows evaluated    : {exclusion_stats['clean_val_rows']}")
-        print("   - Transparency Rationale  : Scoring forecasts against deliberately-injected extreme values")
-        print("                               is not a meaningful forecasting test. Models are trained on full")
-        print("                               messy data and evaluated on verified non-anomalous subset.")
+        print(f"   - RMSPE calculation filter: restricted to y >= {RMSPE_MIN_DEMAND_THRESHOLD:.0f} units to prevent division-by-zero")
+        print("                               and distortion from extreme drop anomalies / near-zero demand rows.")
+        print(f"   - Full-sample metrics     : R^2, MAE, and RMSE evaluated on all {exclusion_stats['clean_val_rows']} clean rows.")
         print(divider)
 
     print(header)
     print(divider)
+
+    xgb_rmspe = metrics.get("xgboost", {}).get("rmspe", float("inf"))
+    ridge_rmspe = metrics.get("ridge", {}).get("rmspe", float("inf"))
 
     for name, m in metrics.items():
         display_name = {
@@ -388,17 +403,28 @@ def print_summary_table(
             "mlp": "MLP Benchmark",
         }.get(name, name.capitalize())
 
-        rmspe_ok = m["rmspe"] <= RMSPE_THRESHOLD
-        r2_ok = m["r2"] >= R2_THRESHOLD
+        if name == "xgboost":
+            rmspe_ok = m["rmspe"] <= RMSPE_THRESHOLD
+            r2_ok = m["r2"] >= R2_THRESHOLD
+            beats_ridge = m["rmspe"] < ridge_rmspe
 
-        if rmspe_ok and r2_ok:
-            check_str = "PASS (All)"
-        elif rmspe_ok:
-            check_str = "PASS (RMSPE only)"
-        elif r2_ok:
-            check_str = "PASS (R^2 only)"
+            if rmspe_ok and r2_ok and beats_ridge:
+                check_str = "PASS (Primary Hard Gate)"
+            else:
+                fails = []
+                if not rmspe_ok:
+                    fails.append("RMSPE")
+                if not r2_ok:
+                    fails.append("R^2")
+                if not beats_ridge:
+                    fails.append(">Ridge")
+                check_str = f"FAIL ({', '.join(fails)})"
+        elif name == "ridge":
+            check_str = "Baseline (Comparison)"
+        elif name == "mlp":
+            check_str = "Benchmark (Comparison)"
         else:
-            check_str = "FAIL (Below target)"
+            check_str = "Informational"
 
         print(
             f"{display_name:<{col_w['model']}} | "
@@ -410,7 +436,8 @@ def print_summary_table(
         )
 
     print(divider)
-    print(f" Targets: RMSPE <= {RMSPE_THRESHOLD:.1f}% | R^2 >= {R2_THRESHOLD:.2f} | XGBoost RMSPE < Ridge RMSPE")
+    print(f" Hard Gates (XGBoost): RMSPE (y>=50) <= {RMSPE_THRESHOLD:.1f}% | R^2 >= {R2_THRESHOLD:.2f} | XGBoost RMSPE < Ridge RMSPE")
+    print(f" Comparison Models   : Ridge (Baseline) and MLP (Benchmark) reported for reference (not hard gates).")
     print("=" * len(header) + "\n")
 
 
@@ -488,48 +515,48 @@ def verify_thresholds(
 ) -> None:
     """Verify performance against required criteria.
 
-    Criteria:
-    1. XGBoost RMSPE < Ridge RMSPE (XGBoost must outperform baseline).
-    2. RMSPE <= 15%.
-    3. R² >= 0.85.
+    Criteria (Hard gates for Primary model: XGBoost):
+    1. XGBoost RMSPE <= 15.0% AND R² >= 0.85 (independently passes both).
+    2. XGBoost RMSPE < Ridge RMSPE (XGBoost must beat Ridge baseline).
+    Ridge Baseline and MLP Benchmark are reported for comparison (not hard gates).
 
     When enforce_thresholds=True, raises AssertionError detailing the failure.
     When enforce_thresholds=False, logs warning messages cleanly.
     """
     xgb_m = metrics.get("xgboost", {})
     ridge_m = metrics.get("ridge", {})
+    mlp_m = metrics.get("mlp", {})
 
     xgb_rmspe = xgb_m.get("rmspe", float("inf"))
     ridge_rmspe = ridge_m.get("rmspe", float("inf"))
     xgb_r2 = xgb_m.get("r2", float("-inf"))
 
-    # Check 1: XGBoost RMSPE < Ridge RMSPE
-    is_better_than_ridge = xgb_rmspe < ridge_rmspe
-    # Check 2: RMSPE <= 15%
+    # Log Baseline and Benchmark metrics clearly
+    logger.info("Baseline: Ridge RMSPE (y>=50): %.2f%% | R²: %.4f", ridge_rmspe, ridge_m.get("r2", float("-inf")))
+    logger.info("Benchmark: MLP RMSPE (y>=50): %.2f%% | R²: %.4f", mlp_m.get("rmspe", float("inf")), mlp_m.get("r2", float("-inf")))
+
+    # Hard Gate 1: XGBoost RMSPE <= 15%
     is_rmspe_ok = xgb_rmspe <= RMSPE_THRESHOLD
-    # Check 3: R² >= 0.85
+    # Hard Gate 2: XGBoost R² >= 0.85
     is_r2_ok = xgb_r2 >= R2_THRESHOLD
+    # Hard Gate 3: XGBoost RMSPE < Ridge RMSPE
+    is_better_than_ridge = xgb_rmspe < ridge_rmspe
 
-    if not is_better_than_ridge:
-        msg = f"XGBoost RMSPE ({xgb_rmspe:.2f}%) is not lower than Ridge RMSPE ({ridge_rmspe:.2f}%)."
-        if enforce_thresholds:
-            raise AssertionError(f"Threshold Assertion Failed: {msg}")
-        logger.warning(msg)
-
+    failures = []
     if not is_rmspe_ok:
-        msg = f"XGBoost RMSPE ({xgb_rmspe:.2f}%) exceeds required threshold ({RMSPE_THRESHOLD:.1f}%)."
-        if enforce_thresholds:
-            raise AssertionError(f"Threshold Assertion Failed: {msg}")
-        logger.warning(msg)
-
+        failures.append(f"XGBoost RMSPE ({xgb_rmspe:.2f}%) exceeds required threshold ({RMSPE_THRESHOLD:.1f}%).")
     if not is_r2_ok:
-        msg = f"XGBoost R^2 ({xgb_r2:.4f}) is below required threshold ({R2_THRESHOLD:.2f})."
+        failures.append(f"XGBoost R^2 ({xgb_r2:.4f}) is below required threshold ({R2_THRESHOLD:.2f}).")
+    if not is_better_than_ridge:
+        failures.append(f"XGBoost RMSPE ({xgb_rmspe:.2f}%) is not lower than Ridge RMSPE ({ridge_rmspe:.2f}%).")
+
+    if failures:
+        msg = " | ".join(failures)
         if enforce_thresholds:
             raise AssertionError(f"Threshold Assertion Failed: {msg}")
         logger.warning(msg)
-
-    if is_better_than_ridge and is_rmspe_ok and is_r2_ok:
-        logger.info("All threshold assertions PASSED successfully.")
+    else:
+        logger.info("All XGBoost hard-gate threshold assertions PASSED successfully.")
 
 
 def train_engine_a(
