@@ -213,3 +213,91 @@ def test_train_engine_a_missing_data():
     """Verify FileNotFoundError on non-existent dataset path."""
     with pytest.raises(FileNotFoundError):
         train_engine_a(data_path="nonexistent_dataset.parquet")
+
+
+def test_train_engine_a_ground_truth_exclusion(tmp_path):
+    """Verify that validation anomalies are identified, excluded from evaluation, and reported."""
+    output_dir = tmp_path / "models"
+    result = train_engine_a(
+        models_dir=output_dir,
+        enforce_thresholds=False,
+        random_state=42,
+    )
+
+    assert "exclusion_stats" in result
+    stats = result["exclusion_stats"]
+
+    # Check structure and values of exclusion_stats
+    assert stats["total_val_rows"] == 900
+    assert stats["excluded_rows"] == 48
+    assert stats["clean_val_rows"] == 852
+    assert np.isclose(stats["excluded_pct"], 5.333333333, atol=0.01)
+
+    # Verify that training data retained full messy data (including anomalies)
+    train_df = result["train_df"]
+    assert len(train_df) == 3600
+    gt_path = Path(__file__).resolve().parent.parent / "data" / "benchmark_data_ground_truth.parquet"
+    if gt_path.is_file():
+        gt_df = pd.read_parquet(gt_path)
+        gt_anomalies = set(gt_df[gt_df["is_anomaly"]]["row_index"])
+        train_anomalies = set(train_df["row_index"]).intersection(gt_anomalies)
+        # Training set MUST retain anomalous rows
+        assert len(train_anomalies) > 0, "Training set should retain realistic messy anomalous rows!"
+        assert len(train_anomalies) == 181  # 181 anomalies in retained training fold rows
+
+    # Check metrics were computed and XGBoost outperforms Ridge
+    metrics = result["metrics"]
+    assert metrics["xgboost"]["rmspe"] < metrics["ridge"]["rmspe"]
+
+
+def test_train_engine_a_missing_or_invalid_ground_truth(tmp_path):
+    """Verify graceful fallback when ground truth is missing or missing expected columns."""
+    output_dir = tmp_path / "models"
+
+    # 1. Non-existent ground truth file -> evaluates all validation rows without crashing
+    res_missing = train_engine_a(
+        models_dir=output_dir / "missing",
+        ground_truth_path="nonexistent_ground_truth.parquet",
+        enforce_thresholds=False,
+    )
+    assert res_missing["exclusion_stats"]["excluded_rows"] == 0
+    assert res_missing["exclusion_stats"]["clean_val_rows"] == res_missing["exclusion_stats"]["total_val_rows"]
+
+    # 2. Corrupt/missing columns ground truth file
+    bad_gt_file = tmp_path / "bad_gt.parquet"
+    pd.DataFrame({"wrong_col": [1, 2, 3]}).to_parquet(bad_gt_file)
+    res_bad = train_engine_a(
+        models_dir=output_dir / "bad",
+        ground_truth_path=bad_gt_file,
+        enforce_thresholds=False,
+    )
+    assert res_bad["exclusion_stats"]["excluded_rows"] == 0
+    assert res_bad["exclusion_stats"]["clean_val_rows"] == res_bad["exclusion_stats"]["total_val_rows"]
+
+
+def test_train_engine_a_cli_execution(tmp_path):
+    """Verify train_engine_a executes from CLI with transparency reporting output."""
+    import subprocess
+    import sys
+
+    backend_dir = Path(__file__).resolve().parent.parent
+    cmd = [
+        sys.executable,
+        "-m",
+        "src.training.train_engine_a",
+        "--models-dir",
+        str(tmp_path / "models"),
+    ]
+    proc = subprocess.run(
+        cmd,
+        cwd=str(backend_dir),
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, f"CLI execution failed:\nStdout: {proc.stdout}\nStderr: {proc.stderr}"
+    assert "Validation Scope & Anomaly Exclusion:" in proc.stdout
+    assert "Total validation rows   : 900" in proc.stdout
+    assert "Excluded anomalous rows : 48 (5.33%)" in proc.stdout
+    assert "Clean rows evaluated    : 852" in proc.stdout
+    assert "FORESIGHT ENGINE A FORECASTING MODEL BENCHMARK SUMMARY" in proc.stdout
+

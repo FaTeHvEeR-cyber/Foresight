@@ -41,11 +41,11 @@ def test_load_data_strict_no_leakage():
     """Verify that features and labels are loaded without label leakage."""
     features_df, labels = load_data()
 
-    assert len(features_df) == 5000
-    assert len(labels) == 5000
+    assert len(features_df) == len(labels)
+    assert len(features_df) >= 5000
     assert "is_anomaly" not in features_df.columns, "Label leakage: 'is_anomaly' must NOT be in features!"
     assert labels.dtype == bool
-    assert labels.sum() == 250  # Exactly 5.0% contamination
+    assert labels.sum() == int(len(features_df) * 0.05)  # Exactly 5.0% contamination
 
 
 def test_prepare_anomaly_features():

@@ -1,4 +1,4 @@
-﻿"""Engine B Clustering & 2D Projection Training Script.
+"""Engine B Clustering & 2D Projection Training Script.
 
 This module implements the training, evaluation, and serialization pipeline
 for Foresight's Engine B:
@@ -35,7 +35,7 @@ logging.basicConfig(
 # Relevant numeric features for retail store clustering with strong signal
 DEFAULT_NUMERIC_FEATURES: List[str] = [
     "promo_flag",
-    "competitor_distance",
+    "customer_rating",
     "units_sold",
 ]
 
