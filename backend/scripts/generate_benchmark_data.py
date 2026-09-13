@@ -15,9 +15,9 @@ def generate_data(output_dir="."):
     np.random.seed(42)
 
     # Configuration
-    n_rows = 5000
     n_stores = 50
-    days_per_store = n_rows // n_stores
+    days_per_store = 120
+    n_rows = n_stores * days_per_store
     start_date = datetime(2022, 1, 1)
 
     # 1. Generate a synthetic tabular dataset
@@ -67,14 +67,22 @@ def generate_data(output_dir="."):
     type_multiplier = {'Mall': 1.5, 'Street': 1.0, 'Strip': 1.2}
     base_sales = df['store_type'].map(type_multiplier) * 100
 
-    promo_effect = df['promo_flag'] * 50
-    dow_effect = np.where(df['day_of_week'] >= 5, 40, 0) # higher on weekends
-    temp_effect = -0.5 * (df['temperature'] - 15)**2 + 20
-    holiday_effect = df['local_holiday'] * 80
-
-    # Combine signals + noise for target
-    units_sold = base_sales + promo_effect + dow_effect + temp_effect + holiday_effect + np.random.normal(0, 20, n_rows)
+    # Multiplicative promo effect (+40%)
+    promo_multiplier = np.where(df['promo_flag'] == 1, 1.4, 1.0)
     
+    # Stronger weekend effect
+    dow_effect = np.where(df['day_of_week'] >= 5, 60, 0)
+    
+    # Smoother non-linear temperature effect (optimal at 20C)
+    temp_effect = -1.0 * (df['temperature'] - 20)**2 + 50
+    
+    # Multiplicative holiday spike (+80%)
+    holiday_multiplier = np.where(df['local_holiday'] == 1, 1.8, 1.0)
+
+    # Combine signals + reduced noise for target
+    signal = (base_sales + dow_effect + temp_effect) * promo_multiplier * holiday_multiplier
+    units_sold = signal + np.random.normal(0, 5, n_rows)
+
     # Strictly clip to > 0
     units_sold = np.clip(units_sold, 1, None)
     df['units_sold'] = np.round(units_sold).astype(int)
