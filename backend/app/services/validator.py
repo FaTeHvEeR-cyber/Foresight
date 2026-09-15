@@ -32,7 +32,7 @@ def validate_file_size(size_bytes: int) -> None:
         max_mb = settings.MAX_FILE_SIZE_BYTES / (1024 * 1024)
         file_mb = size_bytes / (1024 * 1024)
         raise FileValidationError(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=f"File exceeds the 25MB limit ({file_mb:.2f} MB uploaded, max is {max_mb:.0f} MB)."
         )
 

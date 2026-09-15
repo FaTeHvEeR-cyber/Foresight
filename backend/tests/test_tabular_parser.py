@@ -145,7 +145,7 @@ def test_compute_raw_null_profile():
     df = pd.DataFrame({
         "age": [25, None, 30, None, 50],             # 2 / 5 nulls = 40.0%
         "salary": [50000.0, 60000.0, None, 80000.0, 90000.0],  # 1 / 5 nulls = 20.0%
-        "dept": ["Eng", "HR", "Sales", "Eng", "HR"], # 0 / 5 nulls = 0.0%
+        "dept": ["Eng", "HR", "Sales", "Eng", "HR"],  # 0 / 5 nulls = 0.0%
         "all_null": [None, None, None, None, None],  # 5 / 5 nulls = 100.0%
     })
 

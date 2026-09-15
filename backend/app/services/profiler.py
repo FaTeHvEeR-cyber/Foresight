@@ -44,7 +44,7 @@ def infer_column_type(series: pd.Series) -> InferredType:
         return "boolean"
 
     try:
-        parsed = pd.to_datetime(sample, errors="coerce")
+        parsed = pd.to_datetime(sample, errors="coerce", format="mixed")
         if parsed.notna().sum() > len(sample) * 0.8:
             return "datetime"
     except Exception:

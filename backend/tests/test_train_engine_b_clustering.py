@@ -1,4 +1,4 @@
-﻿"""Tests for Engine B Clustering training pipeline (train_engine_b_clustering.py)."""
+"""Tests for Engine B Clustering training pipeline (train_engine_b_clustering.py)."""
 
 from pathlib import Path
 import joblib
@@ -8,7 +8,6 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
 from src.training.train_engine_b_clustering import (
-    DEFAULT_NUMERIC_FEATURES,
     SILHOUETTE_THRESHOLD,
     PCA_VARIANCE_THRESHOLD,
     train_engine_b,

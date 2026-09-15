@@ -10,13 +10,8 @@ from sklearn.neural_network import MLPRegressor
 from xgboost import XGBRegressor
 
 from src.training.train_engine_a import (
-    LAG_PERIODS,
-    ROLLING_WINDOWS,
-    RMSPE_THRESHOLD,
-    R2_THRESHOLD,
     compute_rmspe,
     engineer_features,
-    load_dataset,
     split_train_validation,
     train_engine_a,
     verify_thresholds,
@@ -103,9 +98,6 @@ def test_train_engine_a_no_temporal_leakage():
     # For any row in engineered df:
     # 1. lag_7 must match the target value from 7 days ago
     for idx, row in engineered.iterrows():
-        orig_row = df[df["date"] == row["date"]].iloc[0]
-        curr_val = orig_row["units_sold"]
-
         date_t_minus_7 = row["date"] - pd.Timedelta(days=7)
         past_row = df[df["date"] == date_t_minus_7]
         if not past_row.empty:
@@ -162,7 +154,6 @@ def test_train_engine_a_split_strict_time_cutoff():
     )
 
     max_train_date = train_df["date"].max()
-    min_val_date = val_df["date"].max()
     assert max_train_date < val_df["date"].min(), (
         f"Train max date ({max_train_date}) must strictly precede val min date ({val_df['date'].min()})"
     )

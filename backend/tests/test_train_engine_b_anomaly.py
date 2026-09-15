@@ -14,12 +14,9 @@ from pathlib import Path
 
 import joblib
 import numpy as np
-import pandas as pd
-import pytest
 from sklearn.ensemble import IsolationForest
 
 from src.training.train_engine_b_anomaly import (
-    evaluate_predictions,
     find_benchmark_file,
     fit_isolation_forest,
     load_data,

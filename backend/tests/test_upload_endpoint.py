@@ -3,8 +3,6 @@
 import io
 import pytest
 from starlette.testclient import TestClient
-import pandas as pd
-import numpy as np
 
 from main import app, DATA_STORE
 

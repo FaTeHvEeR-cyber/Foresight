@@ -7,7 +7,6 @@ Verifies:
 """
 
 import io
-import pytest
 from fastapi import status
 
 
@@ -18,7 +17,7 @@ def test_reject_oversized_file(client):
     files = {"file": ("huge_dataset.csv", io.BytesIO(oversized_bytes), "text/csv")}
     
     response = client.post("/api/upload", files=files)
-    assert response.status_code == status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
+    assert response.status_code == status.HTTP_413_CONTENT_TOO_LARGE
     assert "25MB" in response.json()["detail"]
 
 

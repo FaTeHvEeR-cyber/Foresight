@@ -73,7 +73,7 @@ def test_modeling_algorithms_succeed_on_imputed_data():
 
     # 1. Ridge regression
     ridge = Ridge()
-    ridge.fit(X, y)
+    ridge.fit(X, y )
     preds = ridge.predict(X)
     assert len(preds) == n_rows
 

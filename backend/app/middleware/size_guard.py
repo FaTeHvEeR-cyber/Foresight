@@ -23,7 +23,7 @@ class FileSizeLimitMiddleware(BaseHTTPMiddleware):
                     max_mb = settings.MAX_FILE_SIZE_BYTES / (1024 * 1024)
                     uploaded_mb = length / (1024 * 1024)
                     return JSONResponse(
-                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                         content={
                             "detail": (
                                 f"File exceeds the 25MB limit "

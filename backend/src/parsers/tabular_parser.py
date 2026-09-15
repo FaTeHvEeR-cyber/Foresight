@@ -12,10 +12,7 @@ import warnings
 import numpy as np
 import pandas as pd
 
-try:
-    from src.models import ColumnNullMetric, RawNullProfile
-except ImportError:
-    from backend.src.models import ColumnNullMetric, RawNullProfile
+from src.models import ColumnNullMetric, RawNullProfile
 
 
 InferredType = Literal["numeric", "categorical", "datetime", "text", "boolean"]
