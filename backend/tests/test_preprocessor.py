@@ -66,8 +66,8 @@ def test_modeling_algorithms_succeed_on_imputed_data():
 
     # Feature matrix for modeling (all numeric columns except target)
     feature_cols = [c for c in imputed_df.columns if c != "target"]
-    X = imputed_df[feature_cols].values
-    y = imputed_df["target"].values
+    X = imputed_df[feature_cols].to_numpy()
+    y = imputed_df["target"].to_numpy()
 
     assert not np.isnan(X).any(), "Feature matrix contains NaNs!"
 

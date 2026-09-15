@@ -65,7 +65,7 @@ def run_diagnostics():
     gt_df = pd.read_parquet(gt_path)
     gt_map = gt_df.set_index("row_index")["is_anomaly"].to_dict()
 
-    val_is_anomaly = val_df["row_index"].map(gt_map).fillna(False).values.astype(bool)
+    val_is_anomaly = val_df["row_index"].map(gt_map).fillna(False).to_numpy(dtype=bool)
     val_clean_mask = ~val_is_anomaly
 
     total_val = len(val_df)

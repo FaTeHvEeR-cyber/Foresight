@@ -35,8 +35,8 @@ def test_engine_b_training_end_to_end(tmp_path):
     assert isinstance(result["scaler"], StandardScaler)
     assert isinstance(result["kmeans"], KMeans)
     assert isinstance(result["pca"], PCA)
-    assert result["kmeans"].n_clusters == 4
-    assert result["pca"].n_components == 2
+    assert result["kmeans"].get_params()["n_clusters"] == 4
+    assert result["pca"].get_params()["n_components"] == 2
 
     # 3. Metrics thresholds
     metrics = result["metrics"]
@@ -63,8 +63,8 @@ def test_engine_b_training_end_to_end(tmp_path):
     assert isinstance(loaded_scaler, StandardScaler)
     assert isinstance(loaded_kmeans, KMeans)
     assert isinstance(loaded_pca, PCA)
-    assert loaded_kmeans.n_clusters == 4
-    assert loaded_pca.n_components == 2
+    assert loaded_kmeans.get_params()["n_clusters"] == 4
+    assert loaded_pca.get_params()["n_components"] == 2
 
 
 def test_engine_b_custom_features_and_reporting(tmp_path):

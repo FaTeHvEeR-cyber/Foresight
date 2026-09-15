@@ -184,7 +184,7 @@ def infer_column_types(df: pd.DataFrame) -> list[dict]:
     result = []
     for col in df.columns:
         result.append({
-            "name": str(col),
+            "name": f"{col}",
             "inferredType": infer_column_type(df[col]),
         })
     return result
@@ -207,9 +207,9 @@ def compute_raw_null_profile(df: pd.DataFrame) -> list[RawNullProfile]:
     profiles: list[RawNullProfile] = []
 
     for col in df.columns:
-        col_name = str(col)
+        col_name = f"{col}"
         series = df[col]
-        null_count = int(series.isna().sum())
+        null_count = series.isna().sum()
         null_pct = round((null_count / total_rows * 100.0), 2) if total_rows > 0 else 0.0
 
         metric = ColumnNullMetric(
