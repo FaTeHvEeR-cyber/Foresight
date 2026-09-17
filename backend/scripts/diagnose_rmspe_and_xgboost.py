@@ -92,7 +92,7 @@ def run_diagnostics():
     t_p25 = float(val_series.quantile(0.25))
     t_median = float(val_series.median())
     t_mean = float(val_series.mean())
-    t_std = float(cast(float, val_series.std()))
+    t_std = float(val_series.std())  # type: ignore[arg-type]
     t_p75 = float(val_series.quantile(0.75))
     t_p95 = float(val_series.quantile(0.95))
     t_max = float(val_series.max())

@@ -72,7 +72,7 @@ def profile_dataframe(
     for col in df.columns:
         col_str = f"{col}"
         series = pd.Series(df[col])
-        null_count = int(series.isna().sum())
+        null_count = series.isna().sum()
         null_pct = round((null_count / total_rows * 100.0), 2) if total_rows > 0 else 0.0
         inferred = infer_column_type(series)
 

@@ -60,10 +60,10 @@ def impute_for_modeling(df: pd.DataFrame) -> pd.DataFrame:
 
             # Calculate column median with 0.0 fallback if column is entirely NaN
             median_val = series.median()
-            if bool(pd.isna(median_val)):
+            if pd.isna(median_val):  # type: ignore[reportGeneralTypeIssues]
                 median_val = 0.0
             else:
-                median_val = float(cast(float, median_val))
+                median_val = cast(float, median_val)
 
             # Preserve float32 or cast if downcasted
             if series.dtype == np.float32:

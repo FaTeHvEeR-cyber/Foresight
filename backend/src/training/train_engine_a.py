@@ -138,10 +138,10 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
         ).fillna(0.0)
 
     # 3. Calendar encodings
-    data["day_of_week"] = data["date"].dt.dayofweek
-    data["day_of_month"] = data["date"].dt.day
-    data["month"] = data["date"].dt.month
-    data["day_of_year"] = data["date"].dt.dayofyear
+    data["day_of_week"] = data["date"].dt.dayofweek  # type: ignore[attr-defined]
+    data["day_of_month"] = data["date"].dt.day  # type: ignore[attr-defined]
+    data["month"] = data["date"].dt.month  # type: ignore[attr-defined]
+    data["day_of_year"] = data["date"].dt.dayofyear  # type: ignore[attr-defined]
     data["is_weekend"] = (data["day_of_week"] >= 5).astype(int)
 
     # Cyclical trigonometric encodings
@@ -221,7 +221,7 @@ def split_train_validation(
         X_train_df = train_df[num_cols].copy()
         X_val_df = val_df[num_cols].copy()
 
-    feature_names: List[str] = [str(c) for c in X_train_df.columns]
+    feature_names: List[str] = [c for c in X_train_df.columns]
     y_train = np.asarray(train_df["units_sold"], dtype=float)
     y_val = np.asarray(val_df["units_sold"], dtype=float)
 

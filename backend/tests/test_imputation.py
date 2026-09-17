@@ -136,7 +136,7 @@ def test_downstream_modeling_algorithms_succeed():
     assert not bool(imputed[feature_cols].isna().to_numpy().any()), "Feature matrix contains NaNs!"
 
     X = imputed[feature_cols].astype(float).values
-    y = imputed["target"].values
+    y = imputed["target"].to_numpy(dtype=float)
 
     # 1. Ridge regression
     ridge = Ridge()

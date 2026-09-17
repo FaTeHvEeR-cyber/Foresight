@@ -48,7 +48,7 @@ def create_imputed_modeling_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[s
 
             # 2. Median imputation
             median_raw = series.median()
-            median_val = float(cast(float, median_raw)) if not bool(pd.isna(median_raw)) else 0.0
+            median_val = cast(float, median_raw) if not pd.isna(median_raw) else 0.0  # type: ignore[reportGeneralTypeIssues]
 
             imputed_df[col] = series.fillna(median_val)
 
@@ -72,7 +72,7 @@ def prepare_modeling_dataset(df: pd.DataFrame) -> Tuple[pd.DataFrame, Imputation
     median_values: Dict[str, float] = {}
     for col in imputed_numeric_cols:
         med_val = df[col].median()
-        median_values[col] = float(cast(float, med_val)) if not bool(pd.isna(med_val)) else 0.0
+        median_values[col] = cast(float, med_val) if not pd.isna(med_val) else 0.0  # type: ignore[reportGeneralTypeIssues]
 
     summary = ImputationSummary(
         imputed_numeric_columns=imputed_numeric_cols,

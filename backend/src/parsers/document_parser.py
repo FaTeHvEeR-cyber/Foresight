@@ -297,13 +297,13 @@ def parse_document(file_bytes: bytes, extension: str) -> Dict[str, Any]:
         raise DocumentParseError("Extension cannot be empty.")
 
     if norm_ext == "pdf":
-        return _parse_pdf(bytes(file_bytes))
+        return _parse_pdf(file_bytes)
     elif norm_ext == "docx":
-        return _parse_docx(bytes(file_bytes))
+        return _parse_docx(file_bytes)
     elif norm_ext == "txt":
-        return _parse_txt(bytes(file_bytes))
+        return _parse_txt(file_bytes)
     elif norm_ext == "md":
-        return _parse_md(bytes(file_bytes))
+        return _parse_md(file_bytes)
     else:
         raise DocumentParseError(
             f"Unsupported document extension: '{extension}'. "

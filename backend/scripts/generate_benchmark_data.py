@@ -32,13 +32,13 @@ def generate_data(output_dir="."):
     })
 
     # Feature 1: day_of_week
-    df['day_of_week'] = df['date'].dt.dayofweek
+    df['day_of_week'] = df['date'].dt.dayofweek  # type: ignore[attr-defined]
 
     # Feature 2: promo_flag (mostly on weekends or random)
     df['promo_flag'] = np.random.choice([0, 1], size=n_rows, p=[0.8, 0.2])
 
     # Feature 3: temperature (Seasonal temperature with some noise)
-    day_of_year = df['date'].dt.dayofyear
+    day_of_year = df['date'].dt.dayofyear  # type: ignore[attr-defined]
     df['temperature'] = 15 + 10 * np.sin(2 * np.pi * day_of_year / 365.25) + np.random.normal(0, 3, n_rows)
 
     # Feature 4: competitor_distance (fixed per store)
