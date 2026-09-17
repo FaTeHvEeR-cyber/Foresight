@@ -24,7 +24,7 @@ def generate_data(output_dir="."):
     # We will generate daily data for multiple stores
     dates = [start_date + timedelta(days=i) for i in range(days_per_store)]
     store_ids = np.repeat(np.arange(1, n_stores + 1), days_per_store)
-    date_list = np.tile(dates, n_stores)
+    date_list = dates * n_stores
 
     df = pd.DataFrame({
         "store_id": store_ids,
@@ -43,29 +43,29 @@ def generate_data(output_dir="."):
 
     # Feature 4: competitor_distance (fixed per store)
     comp_dist = {s: np.random.uniform(0.5, 20.0) for s in range(1, n_stores + 1)}
-    df['competitor_distance'] = df['store_id'].map(comp_dist)
+    df['competitor_distance'] = df['store_id'].map(comp_dist.get)
 
     # Feature 5: store_type
     store_types = {s: np.random.choice(['Mall', 'Street', 'Strip']) for s in range(1, n_stores + 1)}
-    df['store_type'] = df['store_id'].map(store_types)
+    df['store_type'] = df['store_id'].map(store_types.get)
 
     # Feature 6: region
     regions = {s: np.random.choice(['North', 'South', 'East', 'West']) for s in range(1, n_stores + 1)}
-    df['region'] = df['store_id'].map(regions)
+    df['region'] = df['store_id'].map(regions.get)
 
     # Feature 7: inventory_level
     df['inventory_level'] = np.random.randint(50, 1000, n_rows)
 
     # Feature 8: customer_rating
     ratings = {s: np.random.uniform(3.0, 5.0) for s in range(1, n_stores + 1)}
-    df['customer_rating'] = df['store_id'].map(ratings)
+    df['customer_rating'] = df['store_id'].map(ratings.get)
 
     # Feature 9: local_holiday
     df['local_holiday'] = np.random.choice([0, 1], size=n_rows, p=[0.95, 0.05])
 
     # Target generation (units_sold)
     type_multiplier = {'Mall': 1.5, 'Street': 1.0, 'Strip': 1.2}
-    base_sales = df['store_type'].map(type_multiplier) * 100
+    base_sales = df['store_type'].map(type_multiplier.get) * 100
 
     # Multiplicative promo effect (+40%)
     promo_multiplier = np.where(df['promo_flag'] == 1, 1.4, 1.0)
@@ -92,17 +92,18 @@ def generate_data(output_dir="."):
     anomaly_indices = np.random.choice(n_rows, n_anomalies, replace=False)
 
     df['is_anomaly'] = False
-    df.loc[anomaly_indices, 'is_anomaly'] = True
+    df.loc[anomaly_indices.tolist(), 'is_anomaly'] = True
 
     # Inject anomalies into target and some features
+    units_sold_arr = df['units_sold'].values
     for idx in anomaly_indices:
         anomaly_type = np.random.choice(['spike', 'drop', 'weird_temp'])
         if anomaly_type == 'spike':
-            df.at[idx, 'units_sold'] = int(df.at[idx, 'units_sold'] * np.random.uniform(3, 6))
+            df.at[idx, 'units_sold'] = int(units_sold_arr[idx] * np.random.uniform(3, 6))
         elif anomaly_type == 'drop':
-            df.at[idx, 'units_sold'] = max(1, int(df.at[idx, 'units_sold'] * np.random.uniform(0.01, 0.1)))
+            df.at[idx, 'units_sold'] = max(1, int(units_sold_arr[idx] * np.random.uniform(0.01, 0.1)))
         elif anomaly_type == 'weird_temp':
-            df.at[idx, 'temperature'] = float(np.random.uniform(40, 60)) # Extreme temp
+            df.at[idx, 'temperature'] = float(np.random.uniform(40, 60))  # Extreme temp
 
     # Ensure clipping is respected after anomaly injection
     df['units_sold'] = np.clip(df['units_sold'], 1, None)
@@ -125,7 +126,7 @@ def generate_data(output_dir="."):
     print(f"Generated {n_rows} rows of synthetic benchmark data.")
     print(f"Features and target saved to {benchmark_file}")
     print(f"Ground truth anomalies saved to {gt_file}")
-    print(f"Total anomalies injected: {n_anomalies} ({(n_anomalies/n_rows)*100:.1f}%)")
+    print(f"Total anomalies injected: {n_anomalies} ({(n_anomalies / n_rows) * 100:.1f}%)")
 
 
 if __name__ == "__main__":

@@ -82,7 +82,7 @@ def test_train_engine_a_no_temporal_leakage():
         "store_id": 1,
         "date": dates,
         "units_sold": np.arange(1, 41) * 10,  # 10, 20, 30, ...
-        "day_of_week": dates.dayofweek,
+        "day_of_week": dates.to_series().dt.dayofweek.values,
         "promo_flag": 0,
         "temperature": 20.0,
         "competitor_distance": 5.0,
@@ -106,7 +106,7 @@ def test_train_engine_a_no_temporal_leakage():
         # 2. rolling_mean_7 must strictly use shift(1), so it must NOT include curr_val
         date_t_minus_1 = row["date"] - pd.Timedelta(days=1)
         window_7_dates = pd.date_range(end=date_t_minus_1, periods=7, freq="D")
-        past_window_vals = df[df["date"].isin(window_7_dates)]["units_sold"]
+        past_window_vals = df[df["date"].isin(list(window_7_dates))]["units_sold"]
         expected_rolling_mean = past_window_vals.mean()
         assert np.isclose(row["rolling_mean_7"], expected_rolling_mean)
 

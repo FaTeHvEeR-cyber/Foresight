@@ -21,7 +21,6 @@ Trains and evaluates Foresight's Engine A forecasting models:
 
 import argparse
 import logging
-import os
 import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -119,7 +118,10 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     5. Drops rows containing NaN lag values from the initial lookback window.
     """
     logger.info("Applying time-aware feature engineering...")
-    data = df.sort_values(["store_id", "date"]).reset_index(drop=True).copy()
+    data = df.copy()
+    if not pd.api.types.is_datetime64_any_dtype(data["date"]):
+        data["date"] = pd.to_datetime(data["date"])
+    data = data.sort_values(["store_id", "date"]).reset_index(drop=True)
 
     # 1. Lag features per store: t-7, t-14, t-21, t-30
     for lag in LAG_PERIODS:
@@ -175,17 +177,17 @@ def split_train_validation(
     - Fits StandardScaler exclusively on train features to avoid distribution leakage.
     """
     logger.info("Executing time-based train/validation split...")
-    unique_dates = np.sort(df["date"].unique())
+    unique_dates = np.sort(np.asarray(df["date"].dropna().unique()))
     n_dates = len(unique_dates)
 
     if cutoff_date is not None:
         cutoff = pd.to_datetime(cutoff_date)
     else:
         split_idx = int(n_dates * (1.0 - val_ratio))
-        cutoff = unique_dates[split_idx]
+        cutoff = pd.Timestamp(unique_dates[split_idx])
 
-    train_df = df[df["date"] < cutoff].copy()
-    val_df = df[df["date"] >= cutoff].copy()
+    train_df: pd.DataFrame = pd.DataFrame(df[df["date"] < cutoff]).reset_index(drop=True)
+    val_df: pd.DataFrame = pd.DataFrame(df[df["date"] >= cutoff]).reset_index(drop=True)
 
     logger.info(
         "Time split cutoff: %s | Train dates: %d (%s to %s) | Val dates: %d (%s to %s)",
@@ -219,14 +221,14 @@ def split_train_validation(
         X_train_df = train_df[num_cols].copy()
         X_val_df = val_df[num_cols].copy()
 
-    feature_names = list(X_train_df.columns)
-    y_train = train_df["units_sold"].values.astype(float)
-    y_val = val_df["units_sold"].values.astype(float)
+    feature_names: List[str] = [str(c) for c in X_train_df.columns]
+    y_train = np.asarray(train_df["units_sold"], dtype=float)
+    y_val = np.asarray(val_df["units_sold"], dtype=float)
 
     # Standardize features (fitted strictly on train only)
     scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train_df)
-    X_val_scaled = scaler.transform(X_val_df)
+    X_train_scaled = np.asarray(scaler.fit_transform(X_train_df.astype(float)))
+    X_val_scaled = np.asarray(scaler.transform(X_val_df.astype(float)))
 
     logger.info("Feature preprocessing complete. Features count: %d", len(feature_names))
     return (
@@ -393,7 +395,6 @@ def print_summary_table(
     print(header)
     print(divider)
 
-    xgb_rmspe = metrics.get("xgboost", {}).get("rmspe", float("inf"))
     ridge_rmspe = metrics.get("ridge", {}).get("rmspe", float("inf"))
 
     for name, m in metrics.items():
@@ -437,7 +438,7 @@ def print_summary_table(
 
     print(divider)
     print(f" Hard Gates (XGBoost): RMSPE (y>=50) <= {RMSPE_THRESHOLD:.1f}% | R^2 >= {R2_THRESHOLD:.2f} | XGBoost RMSPE < Ridge RMSPE")
-    print(f" Comparison Models   : Ridge (Baseline) and MLP (Benchmark) reported for reference (not hard gates).")
+    print(" Comparison Models   : Ridge (Baseline) and MLP (Benchmark) reported for reference (not hard gates).")
     print("=" * len(header) + "\n")
 
 
@@ -625,10 +626,10 @@ def train_engine_a(
         gt_df = pd.read_parquet(ground_truth_path)
         if "row_index" in gt_df.columns and "is_anomaly" in gt_df.columns:
             gt_map = gt_df.set_index("row_index")["is_anomaly"].to_dict()
-            val_is_anomaly = val_df["row_index"].map(gt_map).fillna(False).values.astype(bool)
-            val_clean_mask = ~val_is_anomaly
-            excluded_rows = int(val_is_anomaly.sum())
-            clean_val_rows = int(val_clean_mask.sum())
+            val_is_anomaly = np.asarray(val_df["row_index"].map(gt_map.get).fillna(False), dtype=bool)
+            val_clean_mask = np.logical_not(val_is_anomaly)
+            excluded_rows = int(np.sum(val_is_anomaly))
+            clean_val_rows = int(np.sum(val_clean_mask))
             excluded_pct = (excluded_rows / total_val_rows) * 100.0 if total_val_rows > 0 else 0.0
 
             logger.info(

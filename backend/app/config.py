@@ -38,6 +38,21 @@ class Settings(BaseSettings):
     TABULAR_EXTENSIONS: Set[str] = {"csv", "tsv", "xlsx", "xls", "parquet"}
     DOCUMENT_EXTENSIONS: Set[str] = {"pdf", "docx", "txt", "md"}
 
+    # Allowed MIME types
+    ALLOWED_MIME_TYPES: List[str] = [
+        "text/csv",
+        "text/plain",
+        "text/tab-separated-values",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.apache.parquet",
+        "application/x-parquet",
+        "application/octet-stream",
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "text/markdown",
+    ]
+
     @property
     def ALLOWED_EXTENSIONS(self) -> Set[str]:
         return self.TABULAR_EXTENSIONS | self.DOCUMENT_EXTENSIONS

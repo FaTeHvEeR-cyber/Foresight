@@ -5,8 +5,7 @@ and PCA while preserving missingness signals through indicator columns.
 Guarantees the raw DataFrame is never mutated.
 """
 
-from typing import Dict, List, Tuple
-import numpy as np
+from typing import Dict, List, Tuple, cast
 import pandas as pd
 
 from app.models.schemas import ImputationSummary
@@ -34,26 +33,22 @@ def create_imputed_modeling_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[s
     # Numeric columns
     numeric_cols = [
         col for col in imputed_df.columns
-        if pd.api.types.is_numeric_dtype(imputed_df[col])
-        and not pd.api.types.is_bool_dtype(imputed_df[col])
+        if pd.api.types.is_numeric_dtype(imputed_df[col]) and not pd.api.types.is_bool_dtype(imputed_df[col])
     ]
 
     for col in numeric_cols:
-        col_str = str(col)
+        col_str = f"{col}"
         series = imputed_df[col]
 
-        if series.isna().any():
+        if bool(series.isna().any()):
             # 1. Indicator column: {col}_isna (using float for scikit-learn compliance)
             indicator_name = f"{col_str}_isna"
             imputed_df[indicator_name] = series.isna().astype(float)
             indicator_cols.append(indicator_name)
 
             # 2. Median imputation
-            median_val = series.median()
-            if pd.isna(median_val):
-                median_val = 0.0
-            else:
-                median_val = float(median_val)
+            median_raw = series.median()
+            median_val = float(cast(float, median_raw)) if not bool(pd.isna(median_raw)) else 0.0
 
             imputed_df[col] = series.fillna(median_val)
 
@@ -63,7 +58,7 @@ def create_imputed_modeling_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[s
         if col not in numeric_cols and col not in indicator_cols
     ]
     for col in non_numeric_cols:
-        if imputed_df[col].isna().any():
+        if bool(imputed_df[col].isna().any()):
             imputed_df[col] = imputed_df[col].fillna("missing")
 
     return imputed_df, indicator_cols
@@ -74,10 +69,10 @@ def prepare_modeling_dataset(df: pd.DataFrame) -> Tuple[pd.DataFrame, Imputation
     imputed_df, indicator_cols = create_imputed_modeling_data(df)
     
     imputed_numeric_cols = [c.replace("_isna", "") for c in indicator_cols]
-    median_values = {
-        col: float(df[col].median()) if not pd.isna(df[col].median()) else 0.0
-        for col in imputed_numeric_cols
-    }
+    median_values: Dict[str, float] = {}
+    for col in imputed_numeric_cols:
+        med_val = df[col].median()
+        median_values[col] = float(cast(float, med_val)) if not bool(pd.isna(med_val)) else 0.0
 
     summary = ImputationSummary(
         imputed_numeric_columns=imputed_numeric_cols,

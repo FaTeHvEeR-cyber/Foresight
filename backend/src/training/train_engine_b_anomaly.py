@@ -8,9 +8,8 @@ and serializes the trained model to models/isolation_forest.joblib.
 
 import argparse
 import logging
-import os
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import joblib
 import numpy as np
@@ -46,9 +45,9 @@ def find_benchmark_file(filename: str, override_path: Optional[str] = None) -> P
         if candidate.exists():
             return candidate
 
+    candidates_str = "\n".join(str(c) for c in candidates)
     raise FileNotFoundError(
-        f"Could not find {filename}. Checked candidates:\n"
-        + "\n".join(str(c) for c in candidates)
+        f"Could not find {filename}. Checked candidates:\n{candidates_str}"
     )
 
 
@@ -94,7 +93,7 @@ def load_data(
         labels.sum(),
         (labels.sum() / len(features_df)) * 100,
     )
-    return features_df, labels
+    return features_df, pd.Series(labels)
 
 
 def prepare_anomaly_features(
@@ -164,7 +163,7 @@ def fit_isolation_forest(
         n_estimators,
     )
     iso = IsolationForest(
-        contamination=contamination,
+        contamination=contamination,  # type: ignore[arg-type]
         random_state=random_state,
         n_estimators=n_estimators,
         n_jobs=-1,

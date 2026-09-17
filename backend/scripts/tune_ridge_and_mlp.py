@@ -10,7 +10,6 @@
 import itertools
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -21,7 +20,7 @@ from sklearn.neural_network import MLPRegressor
 # Add backend directory to sys.path to import src modules
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-from src.training.train_engine_a import (
+from src.training.train_engine_a import (  # noqa: E402
     compute_rmspe,
     engineer_features,
     load_dataset,
@@ -63,16 +62,16 @@ def run_tuning():
     gt_df = pd.read_parquet(gt_path)
     gt_map = gt_df.set_index("row_index")["is_anomaly"].to_dict()
 
-    val_is_anomaly = val_df["row_index"].map(gt_map).fillna(False).values.astype(bool)
-    val_clean_mask = ~val_is_anomaly
+    val_is_anomaly = np.asarray(val_df["row_index"].map(gt_map.get).fillna(False), dtype=bool)
+    val_clean_mask = np.logical_not(val_is_anomaly)
 
     total_val = len(val_df)
-    clean_val_count = int(val_clean_mask.sum())
-    anom_val_count = int(val_is_anomaly.sum())
+    clean_val_count = int(np.sum(val_clean_mask))
+    anom_val_count = int(np.sum(val_is_anomaly))
 
     print(
         f"Validation summary: {total_val} total rows | {anom_val_count} anomalies "
-        f"({anom_val_count/total_val*100:.2f}%) | {clean_val_count} clean rows"
+        f"({(anom_val_count / total_val) * 100:.2f}%) | {clean_val_count} clean rows"
     )
 
     X_val_clean = X_val[val_clean_mask]
@@ -84,8 +83,8 @@ def run_tuning():
     count_lt50 = int(np.sum(~mask_ge50))
     print(
         f"Evaluation scope: {clean_val_count} clean rows total | "
-        f"{count_ge50} rows with y >= 50 ({count_ge50/clean_val_count*100:.2f}%) | "
-        f"{count_lt50} rows with y < 50 ({count_lt50/clean_val_count*100:.2f}%)"
+        f"{count_ge50} rows with y >= 50 ({(count_ge50 / clean_val_count) * 100:.2f}%) | "
+        f"{count_lt50} rows with y < 50 ({(count_lt50 / clean_val_count) * 100:.2f}%)"
     )
 
     # =========================================================================
@@ -236,7 +235,7 @@ def run_tuning():
         f"{0.8949:>8.4f} | {13.56:>14.2f}% | {14.26:>8.2f} | {21.09:>8.2f}"
     )
     print("-" * 96)
-    print(f"Target Thresholds: R^2 >= 0.85 | RMSPE <= 15.0% | XGBoost RMSPE < Ridge RMSPE")
+    print("Target Thresholds: R^2 >= 0.85 | RMSPE <= 15.0% | XGBoost RMSPE < Ridge RMSPE")
 
 
 if __name__ == "__main__":

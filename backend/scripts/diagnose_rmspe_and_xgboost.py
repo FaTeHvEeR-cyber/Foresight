@@ -12,7 +12,7 @@ Investigates:
 import itertools
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Dict, cast
 
 import numpy as np
 import pandas as pd
@@ -22,7 +22,7 @@ from xgboost import XGBRegressor
 # Add backend directory to sys.path to import src modules
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-from src.training.train_engine_a import (
+from src.training.train_engine_a import (  # noqa: E402
     compute_rmspe,
     engineer_features,
     fit_models,
@@ -65,14 +65,14 @@ def run_diagnostics():
     gt_df = pd.read_parquet(gt_path)
     gt_map = gt_df.set_index("row_index")["is_anomaly"].to_dict()
 
-    val_is_anomaly = val_df["row_index"].map(gt_map).fillna(False).to_numpy(dtype=bool)
+    val_is_anomaly = val_df["row_index"].map(gt_map.get).fillna(False).to_numpy(dtype=bool)
     val_clean_mask = ~val_is_anomaly
 
     total_val = len(val_df)
     clean_val_count = int(val_clean_mask.sum())
     anom_val_count = int(val_is_anomaly.sum())
 
-    print(f"Validation summary: {total_val} total rows | {anom_val_count} anomalies ({anom_val_count/total_val*100:.2f}%) | {clean_val_count} clean rows")
+    print(f"Validation summary: {total_val} total rows | {anom_val_count} anomalies ({(anom_val_count / total_val) * 100:.2f}%) | {clean_val_count} clean rows")
 
     # Clean validation subset
     X_val_clean = X_val[val_clean_mask]
@@ -92,7 +92,7 @@ def run_diagnostics():
     t_p25 = float(val_series.quantile(0.25))
     t_median = float(val_series.median())
     t_mean = float(val_series.mean())
-    t_std = float(val_series.std())
+    t_std = float(cast(float, val_series.std()))
     t_p75 = float(val_series.quantile(0.75))
     t_p95 = float(val_series.quantile(0.95))
     t_max = float(val_series.max())
@@ -152,7 +152,7 @@ def run_diagnostics():
 
     # Evaluate metrics on rows < 50 units vs. rows >= 50 units
     if low_count > 0:
-        print(f"\n--- Metrics Breakdown: Subsets (y < 50 vs. y >= 50) ---")
+        print("\n--- Metrics Breakdown: Subsets (y < 50 vs. y >= 50) ---")
         y_low = y_val_clean[low_mask]
         y_high = y_val_clean[~low_mask]
 
@@ -175,7 +175,7 @@ def run_diagnostics():
             print("-" * 65)
 
         # Print actual vs. predicted for each low-value row
-        print(f"\n--- Detailed Low-Value Rows Table (True y < 50) ---")
+        print("\n--- Detailed Low-Value Rows Table (True y < 50) ---")
         print(f"{'Idx':>4} | {'Date':<10} | {'Store':>5} | {'Temp':>6} | {'Type':<6} | {'Actual':>7} | {'Ridge Pred (Err, %Err)':>25} | {'XGB Pred (Err, %Err)':>25} | {'MLP Pred (Err, %Err)':>25}")
         print("-" * 125)
 
@@ -262,26 +262,25 @@ def run_diagnostics():
     for i in range(min(10, len(results_df))):
         row = results_df.iloc[i]
         print(
-            f"{i+1:>4} | {int(row['max_depth']):>9} | {int(row['n_estimators']):>12} | {row['learning_rate']:>13.2f} | "
+            f"{i + 1:>4} | {int(row['max_depth']):>9} | {int(row['n_estimators']):>12} | {row['learning_rate']:>13.2f} | "
             f"{row['r2']:>8.4f} | {row['rmspe']:>9.2f}% | {row['mae']:>8.2f} | {row['rmse']:>8.2f}"
         )
 
     best = results_df.iloc[0]
-    default_config = results_df[
-        (results_df["max_depth"] == 5)
-        & (results_df["n_estimators"] == 100)
-        & (np.isclose(results_df["learning_rate"], 0.08))
-    ]
+    match_depth = results_df["max_depth"] == 5
+    match_nest = results_df["n_estimators"] == 100
+    match_lr = np.isclose(results_df["learning_rate"], 0.08)
+    default_config = results_df[match_depth & match_nest & match_lr]
     default_row = default_config.iloc[0] if len(default_config) > 0 else None
 
     print("\n--- Configuration Comparison ---")
-    print(f"Default Config (depth=5, n_est=100, lr=0.08):")
+    print("Default Config (depth=5, n_est=100, lr=0.08):")
     if default_row is not None:
         print(f"  - R^2: {default_row['r2']:.4f} | RMSPE: {default_row['rmspe']:.2f}% | MAE: {default_row['mae']:.2f} | RMSE: {default_row['rmse']:.2f}")
     print(f"Best Config    (depth={int(best['max_depth'])}, n_est={int(best['n_estimators'])}, lr={best['learning_rate']:.2f}):")
     print(f"  - R^2: {best['r2']:.4f} | RMSPE: {best['rmspe']:.2f}% | MAE: {best['mae']:.2f} | RMSE: {best['rmse']:.2f}")
-    print(f"Ridge Baseline : R^2 = 0.8154 | RMSPE = 299.03% | MAE = 19.37 | RMSE = 27.95")
-    print(f"MLP Benchmark  : R^2 = 0.8474 | RMSPE = 266.86% | MAE = 18.05 | RMSE = 25.42")
+    print("Ridge Baseline : R^2 = 0.8154 | RMSPE = 299.03% | MAE = 19.37 | RMSE = 27.95")
+    print("MLP Benchmark  : R^2 = 0.8474 | RMSPE = 266.86% | MAE = 18.05 | RMSE = 25.42")
 
     # =========================================================================
     # SUMMARY OF FINDINGS
@@ -295,9 +294,9 @@ def run_diagnostics():
     print(f"   - Target min value            : {t_min:.1f} (5th pct: {t_p05:.1f}, 25th pct: {t_p25:.1f})")
     print(f"   - Rows with units_sold < 50   : {low_count} ({low_pct:.2f}%)")
     if low_count > 0:
-        print(f"   - Conclusion: RMSPE inflation IS driven by these natural low-demand rows.")
+        print("   - Conclusion: RMSPE inflation IS driven by these natural low-demand rows.")
     else:
-        print(f"   - Conclusion: No rows < 50 units exist; RMSPE inflation has another root cause.")
+        print("   - Conclusion: No rows < 50 units exist; RMSPE inflation has another root cause.")
 
     print("\n2. Nature of Low-Value Errors (Sensitivity vs. Model Fit):")
     if low_count > 0:
@@ -309,10 +308,10 @@ def run_diagnostics():
             name: float(np.mean(np.abs(preds[name][~low_mask] - y_val_clean[~low_mask])))
             for name in ["ridge", "xgboost", "mlp"]
         }
-        print(f"   - On rows < 50 units:")
+        print("   - On rows < 50 units:")
         for name in ["ridge", "xgboost", "mlp"]:
             print(f"     * {name:<8}: Mean Abs Error = {mean_abs_err_low[name]:.2f} units, but RMSPE = {compute_rmspe(y_val_clean[low_mask], preds[name][low_mask]):.2f}%")
-        print(f"   - On rows >= 50 units:")
+        print("   - On rows >= 50 units:")
         for name in ["ridge", "xgboost", "mlp"]:
             print(f"     * {name:<8}: Mean Abs Error = {mean_abs_err_high[name]:.2f} units, and RMSPE = {compute_rmspe(y_val_clean[~low_mask], preds[name][~low_mask]):.2f}%")
         print("   - Takeaway: Absolute errors on the low-demand rows are comparable to or smaller than")

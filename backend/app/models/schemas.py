@@ -1,6 +1,6 @@
 """Pydantic schemas and REST data contracts for Foresight backend."""
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
@@ -32,9 +32,9 @@ class CamelModel(BaseModel):
 
 class ColumnDescriptor(CamelModel):
     name: str
-    inferred_type: InferredType = Field(..., alias="inferredType")
-    null_count: int = Field(..., alias="nullCount")
-    null_percentage: Optional[float] = Field(0.0, alias="nullPercentage")
+    inferred_type: InferredType
+    null_count: int
+    null_percentage: Optional[float] = 0.0
 
     @property
     def nullCount(self) -> int:
@@ -50,9 +50,9 @@ class ColumnDescriptor(CamelModel):
 
 
 class ColumnNullProfile(CamelModel):
-    null_count: int = Field(..., alias="nullCount")
-    null_percentage: float = Field(..., alias="nullPercentage")
-    total_rows: int = Field(..., alias="totalRows")
+    null_count: int
+    null_percentage: float
+    total_rows: int
 
     @property
     def nullCount(self) -> int:
@@ -74,24 +74,24 @@ class ImputationSummary(CamelModel):
 
 
 class UploadResponse(CamelModel):
-    file_id: str = Field(..., alias="fileId")
-    file_name: str = Field(..., alias="fileName")
-    file_size_bytes: int = Field(..., alias="fileSizeBytes")
-    detected_kind: DetectedFileKind = Field(..., alias="detectedKind")
-    detected_format: DetectedFormat = Field(..., alias="detectedFormat")
-    row_count: Optional[int] = Field(None, alias="rowCount")
-    column_count: Optional[int] = Field(None, alias="columnCount")
+    file_id: str
+    file_name: str
+    file_size_bytes: int
+    detected_kind: DetectedFileKind
+    detected_format: DetectedFormat
+    row_count: Optional[int] = None
+    column_count: Optional[int] = None
     columns: Optional[List[ColumnDescriptor]] = None
-    raw_null_profile: Optional[Dict[str, ColumnNullProfile]] = Field(None, alias="rawNullProfile")
-    memory_usage_bytes: int = Field(..., alias="memoryUsageBytes")
-    imputation_summary: Optional[ImputationSummary] = Field(None, alias="imputationSummary")
-    data_quality_warnings: List[str] = Field(default_factory=list, alias="dataQualityWarnings")
+    raw_null_profile: Optional[Dict[str, ColumnNullProfile]] = None
+    memory_usage_bytes: int
+    imputation_summary: Optional[ImputationSummary] = None
+    data_quality_warnings: List[str] = Field(default_factory=list)
 
 
 class HealthResponse(CamelModel):
     status: str
-    app_name: str = Field(..., alias="appName")
+    app_name: str
     version: str
-    max_file_size_bytes: int = Field(..., alias="maxFileSizeBytes")
-    rate_limiting_enabled: bool = Field(..., alias="rateLimitingEnabled")
-    supported_formats: List[str] = Field(..., alias="supportedFormats")
+    max_file_size_bytes: int
+    rate_limiting_enabled: bool
+    supported_formats: List[str]

@@ -1,7 +1,7 @@
 """Ingestion and security gatekeeper router."""
 
 import uuid
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, UploadFile, status
 
 from app.config import settings
 from app.models.schemas import UploadResponse

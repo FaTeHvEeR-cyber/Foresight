@@ -13,7 +13,6 @@ for Foresight's Engine B:
 
 import argparse
 import logging
-import os
 import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -32,15 +31,16 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s - %(message)s"
 )
 
+# Operational & Spec Criteria Thresholds
+SILHOUETTE_THRESHOLD: float = 0.50
+PCA_VARIANCE_THRESHOLD: float = 0.60
+
 # Relevant numeric features for retail store clustering with strong signal
 DEFAULT_NUMERIC_FEATURES: List[str] = [
     "promo_flag",
     "customer_rating",
     "units_sold",
 ]
-
-SILHOUETTE_THRESHOLD: float = 0.50
-PCA_VARIANCE_THRESHOLD: float = 0.60
 
 
 def resolve_default_data_path() -> Path:
@@ -82,11 +82,11 @@ def load_and_select_features(
         if not pd.api.types.is_numeric_dtype(df[c]):
             raise TypeError(f"Feature column '{c}' is not numeric (dtype: {df[c].dtype})")
 
-    X = df[cols].copy()
+    X: pd.DataFrame = pd.DataFrame(df[cols].copy())
 
-    if X.isna().any().any():
+    if bool(X.isna().to_numpy().any()):
         logger.warning("NaN values detected in feature columns; imputing with median values.")
-        X = X.fillna(X.median())
+        X = pd.DataFrame(X.fillna(X.median()))
 
     logger.info(f"Selected {len(cols)} numeric features: {cols} (Shape: {X.shape})")
     return X, cols
@@ -102,7 +102,7 @@ def fit_models(
     X_scaled = scaler.fit_transform(X)
 
     logger.info("Fitting K-Means clustering (K=4)...")
-    kmeans = KMeans(n_clusters=4, random_state=random_state, n_init=10)
+    kmeans = KMeans(n_clusters=4, random_state=random_state, n_init=10)  # type: ignore[arg-type]
     cluster_labels = kmeans.fit_predict(X_scaled)
 
     logger.info("Fitting PCA for 2D projection...")

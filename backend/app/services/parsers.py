@@ -1,12 +1,11 @@
 """In-memory file parsers for tabular and document formats."""
 
 import io
-from typing import Optional, Tuple
 import pandas as pd
 from pypdf import PdfReader
 import docx
 
-from app.models.schemas import DetectedFileKind, DetectedFormat
+from app.models.schemas import DetectedFormat
 
 
 def parse_tabular_file(

@@ -8,7 +8,7 @@ from typing import Any, Dict
 
 # Prefer pypdf, with optional pdfplumber fallback/enhancement if installed
 try:
-    import pdfplumber
+    import pdfplumber  # type: ignore[import-untyped,import-not-found]
 except ImportError:
     pdfplumber = None
 

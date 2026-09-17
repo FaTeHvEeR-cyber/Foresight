@@ -78,7 +78,7 @@ def test_modeling_algorithms_succeed_on_imputed_data():
     assert len(preds) == n_rows
 
     # 2. KMeans clustering
-    kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
+    kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)  # type: ignore[arg-type]
     clusters = kmeans.fit_predict(X)
     assert len(clusters) == n_rows
 

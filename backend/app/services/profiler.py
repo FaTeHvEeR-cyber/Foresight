@@ -6,7 +6,6 @@ per column for UI display. Does NOT mutate raw input data.
 
 from typing import Dict, List, Tuple
 import pandas as pd
-import numpy as np
 
 from app.models.schemas import (
     ColumnDescriptor,
@@ -72,8 +71,8 @@ def profile_dataframe(
 
     for col in df.columns:
         col_str = f"{col}"
-        series = df[col]
-        null_count = series.isna().sum()
+        series = pd.Series(df[col])
+        null_count = int(series.isna().sum())
         null_pct = round((null_count / total_rows * 100.0), 2) if total_rows > 0 else 0.0
         inferred = infer_column_type(series)
 
@@ -101,7 +100,6 @@ def profile_tabular_dataset(
 ) -> Tuple[List[ColumnDescriptor], Dict[str, ColumnNullProfile], List[str]]:
     """Extended profiler returning columns, raw_profile, and data quality warnings."""
     columns, raw_profile = profile_dataframe(df)
-    total_rows = len(df)
     warnings: List[str] = []
 
     for col, prof in raw_profile.items():

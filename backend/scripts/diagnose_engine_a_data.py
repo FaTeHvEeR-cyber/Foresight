@@ -6,7 +6,7 @@ import numpy as np
 # Add backend directory to sys.path to import src modules
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-from src.training.train_engine_a import load_dataset, engineer_features, split_train_validation
+from src.training.train_engine_a import load_dataset, engineer_features, split_train_validation  # noqa: E402
 
 def run_diagnostics():
     print("==================================================")
@@ -75,7 +75,7 @@ def run_diagnostics():
     X_train_df = pd.DataFrame(X_train_scaled, columns=feature_names)
     correlations = []
     for col in feature_names:
-        r = X_train_df[col].corr(y_series)
+        r = float(pd.Series(X_train_df[col]).corr(pd.Series(y_series)))
         correlations.append((col, r))
         
     correlations.sort(key=lambda x: abs(x[1]), reverse=True)

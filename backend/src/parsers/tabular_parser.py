@@ -7,7 +7,7 @@ Computes raw null profiles before any downstream imputation logic is applied.
 """
 
 import io
-from typing import Any, Dict, List, Literal, Optional
+from typing import Literal
 import warnings
 import numpy as np
 import pandas as pd
@@ -43,7 +43,7 @@ def downcast_numeric_columns(df: pd.DataFrame) -> pd.DataFrame:
             c_max = series.max()
             f32_min = np.finfo(np.float32).min
             f32_max = np.finfo(np.float32).max
-            if pd.isna(c_min):
+            if bool(pd.isna(c_min)):
                 df_downcasted[col] = series.astype(np.float32)
             elif c_min >= f32_min and c_max <= f32_max:
                 converted = series.astype(np.float32)
@@ -60,7 +60,7 @@ def downcast_numeric_columns(df: pd.DataFrame) -> pd.DataFrame:
             i32_min = np.iinfo(np.int32).min
             i32_max = np.iinfo(np.int32).max
 
-            if pd.isna(c_min):
+            if bool(pd.isna(c_min)):
                 df_downcasted[col] = series.astype(np.int16)
             elif c_min >= i16_min and c_max <= i16_max:
                 df_downcasted[col] = series.astype(np.int16)
@@ -185,7 +185,7 @@ def infer_column_types(df: pd.DataFrame) -> list[dict]:
     for col in df.columns:
         result.append({
             "name": f"{col}",
-            "inferredType": infer_column_type(df[col]),
+            "inferredType": infer_column_type(pd.Series(df[col])),
         })
     return result
 
@@ -208,8 +208,8 @@ def compute_raw_null_profile(df: pd.DataFrame) -> list[RawNullProfile]:
 
     for col in df.columns:
         col_name = f"{col}"
-        series = df[col]
-        null_count = series.isna().sum()
+        series = pd.Series(df[col])
+        null_count = int(series.isna().sum())
         null_pct = round((null_count / total_rows * 100.0), 2) if total_rows > 0 else 0.0
 
         metric = ColumnNullMetric(

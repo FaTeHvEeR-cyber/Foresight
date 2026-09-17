@@ -8,7 +8,8 @@ Null-count reporting comes exclusively from compute_raw_null_profile() in tabula
 which is computed on the raw DataFrame BEFORE this imputation function runs.
 """
 
-from typing import List
+from typing import cast
+
 import numpy as np
 import pandas as pd
 
@@ -47,23 +48,22 @@ def impute_for_modeling(df: pd.DataFrame) -> pd.DataFrame:
     # 1. Identify numeric columns (excluding boolean dtypes)
     numeric_cols = [
         col for col in original_cols
-        if pd.api.types.is_numeric_dtype(imputed_df[col])
-        and not pd.api.types.is_bool_dtype(imputed_df[col])
+        if pd.api.types.is_numeric_dtype(imputed_df[col]) and not pd.api.types.is_bool_dtype(imputed_df[col])
     ]
 
     # 2. Impute numeric columns with median and record missing indicators
     for col in numeric_cols:
         series = imputed_df[col]
-        if series.isna().any():
+        if bool(series.isna().any()):
             # Boolean indicator column: True where value was missing, False otherwise
             imputed_df[f"{col}_was_missing"] = series.isna()
 
             # Calculate column median with 0.0 fallback if column is entirely NaN
             median_val = series.median()
-            if pd.isna(median_val):
+            if bool(pd.isna(median_val)):
                 median_val = 0.0
             else:
-                median_val = float(median_val)
+                median_val = float(cast(float, median_val))
 
             # Preserve float32 or cast if downcasted
             if series.dtype == np.float32:
@@ -75,7 +75,7 @@ def impute_for_modeling(df: pd.DataFrame) -> pd.DataFrame:
     non_numeric_cols = [col for col in original_cols if col not in numeric_cols]
     for col in non_numeric_cols:
         series = imputed_df[col]
-        if series.isna().any():
+        if bool(series.isna().any()):
             imputed_df[f"{col}_was_missing"] = series.isna()
 
             # Categorical handling

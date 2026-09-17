@@ -133,7 +133,7 @@ def test_downstream_modeling_algorithms_succeed():
 
     # Select numeric feature columns (including the was_missing indicators)
     feature_cols = [c for c in imputed.columns if c != "target"]
-    assert not imputed[feature_cols].isna().any().any(), "Feature matrix contains NaNs!"
+    assert not bool(imputed[feature_cols].isna().to_numpy().any()), "Feature matrix contains NaNs!"
 
     X = imputed[feature_cols].astype(float).values
     y = imputed["target"].values
@@ -145,7 +145,7 @@ def test_downstream_modeling_algorithms_succeed():
     assert len(preds) == n_samples
 
     # 2. KMeans clustering
-    kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
+    kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)  # type: ignore[arg-type]
     clusters = kmeans.fit_predict(X)
     assert len(clusters) == n_samples
 

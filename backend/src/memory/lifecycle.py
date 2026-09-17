@@ -17,9 +17,9 @@ from typing import Any, List, Optional, Set
 
 try:
     import pandas as pd
-    _PANDAS_AVAILABLE = True
+    _PANDAS_TYPES: tuple[type, ...] = (pd.DataFrame, pd.Series)
 except ImportError:
-    _PANDAS_AVAILABLE = False
+    _PANDAS_TYPES = ()
 
 
 def _is_intermediate_data(val: Any) -> bool:
@@ -28,9 +28,8 @@ def _is_intermediate_data(val: Any) -> bool:
         return False
 
     # Check for pandas DataFrame or Series
-    if _PANDAS_AVAILABLE:
-        if isinstance(val, (pd.DataFrame, pd.Series)):
-            return True
+    if _PANDAS_TYPES and isinstance(val, _PANDAS_TYPES):
+        return True
 
     # Check for byte buffers or IO streams
     if isinstance(val, (io.BytesIO, io.StringIO, io.BufferedIOBase, io.RawIOBase)):

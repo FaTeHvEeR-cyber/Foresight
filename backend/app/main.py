@@ -1,8 +1,7 @@
 """FastAPI main application entrypoint for Foresight backend."""
 
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.middleware.rate_limit import RateLimitMiddleware

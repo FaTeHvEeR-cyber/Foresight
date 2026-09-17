@@ -15,10 +15,9 @@ contributor(s) to optimize first.
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 # Architecture spec §5.2 default ceiling: 50MB (binary MiB: 50 * 1024 * 1024 bytes)
 DEFAULT_CEILING_MB: float = 50.0

@@ -67,9 +67,9 @@ def test_inferred_types():
         }
     )
 
-    assert infer_column_type(df["bool_col"]) == "boolean"
-    assert infer_column_type(df["num_col"]) == "numeric"
-    assert infer_column_type(df["int_col"]) == "numeric"
-    assert infer_column_type(df["date_col"]) == "datetime"
-    assert infer_column_type(df["cat_col"]) == "categorical"
-    assert infer_column_type(df["text_col"]) == "text"
+    assert infer_column_type(pd.Series(df["bool_col"])) == "boolean"
+    assert infer_column_type(pd.Series(df["num_col"])) == "numeric"
+    assert infer_column_type(pd.Series(df["int_col"])) == "numeric"
+    assert infer_column_type(pd.Series(df["date_col"])) == "datetime"
+    assert infer_column_type(pd.Series(df["cat_col"])) == "categorical"
+    assert infer_column_type(pd.Series(df["text_col"])) == "text"
