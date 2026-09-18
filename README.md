@@ -39,4 +39,7 @@ Foresight is an intelligent forecasting system consisting of multiple predictive
 - **Linting (Flake8)**: Pruned several unused variables and unnecessary dependencies/imports in the test suite (`test_train_engine_a.py`, `test_train_engine_b_anomaly.py`, `test_upload_endpoint.py`). Removed unnecessary typecasting overhead on columns during tabular parsing. 
 - **Tests**: Suppressed internal third-party warnings (`starlette.testclient`) in `pytest.ini` to keep standard outputs clean. The codebase currently passes all 180 unit/integration tests with zero warnings.
 
+### Architectural & Governance Invariants
+- **Continuous Documentation Standard**: Codified Section 6 in `AGENTS.md` and `GEMINI.md` establishing a mandatory project rule that all plans, walkthroughs, defects, architectural updates, function adjustments, and setup instructions must be continuously logged and maintained directly in `README.md`.
+
 *(This file will be continually updated with upcoming architectural changes and features.)*

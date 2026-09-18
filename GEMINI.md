@@ -42,3 +42,15 @@ These rules establish universal guardrails, data policies, and serialization sta
 - **Latency Budget**: Batch inference for `POST /api/v1/forecast` and `POST /api/v1/segmentation` must target < 100ms execution latency.
 - **Review Queue Flag**: `POST /api/v1/segmentation` must return anomaly scores alongside a boolean flag based on the 5% review queue threshold.
 - **Statistical Hypotheses**: Hypothesis evaluation (`POST /api/v1/hypotheses`) must use Welch's t-test (`scipy.stats.ttest_ind(equal_var=False)`) to report lift percentage, t-statistic, and p-value.
+
+---
+
+## 6. Continuous Documentation & README.md Invariant
+- **Mandatory README Logging**: Whenever completing a task, executing setup instructions, making code modifications, updating functions, or altering architectural/design structures, the agent must log and document the full update in `README.md` at the project root.
+- **Living Documentation Standard**: `README.md` (co-located with `AGENTS.md` and `GEMINI.md`) must be continually maintained and never allowed to fall out of sync with the codebase.
+- **Scope of Documented Changes**:
+  - **Architectural & Design Updates**: Structural shifts, pipeline revisions, and engine parameter modifications.
+  - **Function & Interface Changes**: Additions, refactors, or signature changes across backend and frontend services.
+  - **Defect Logs & Bug Fixes**: Root causes, corrective actions, and preventative changes.
+  - **Plans, Walkthroughs & Setup**: Step-by-step setup instructions, verification results, and operational runbooks.
+- **Execution Lifecycle**: Updating and logging in `README.md` is a required completion criterion for every code or configuration change.
