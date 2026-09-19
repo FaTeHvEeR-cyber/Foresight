@@ -208,12 +208,12 @@ def test_api_real_bike_forecast():
     client.post(
         "/api/v1/forecast",
         files={"file": ("day.csv", raw)},
-        data={"target": "cnt", "horizon": 14, "use_llm": "false"},
+        data={"target": "cnt", "horizon": "14", "use_llm": "false"},
     )
     r = client.post(
         "/api/v1/forecast",
         files={"file": ("day.csv", raw)},
-        data={"target": "cnt", "horizon": 14, "use_llm": "false"},
+        data={"target": "cnt", "horizon": "14", "use_llm": "false"},
     )
     assert r.status_code == 200
     j = r.json()

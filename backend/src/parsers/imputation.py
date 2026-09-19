@@ -63,7 +63,7 @@ def impute_for_modeling(df: pd.DataFrame) -> pd.DataFrame:
             if pd.isna(median_val):  # type: ignore[reportGeneralTypeIssues]
                 median_val = 0.0
             else:
-                median_val = cast(float, median_val)
+                median_val = float(median_val)
 
             # Preserve float32 or cast if downcasted
             if series.dtype == np.float32:

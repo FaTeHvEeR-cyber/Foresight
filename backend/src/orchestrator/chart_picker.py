@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import time
+from typing import Any
 
 import httpx
 
@@ -46,7 +47,7 @@ async def pick_chart(kind: str, facts: dict, *, use_llm: bool = True, settings: 
     s = settings or get_settings()
     t0 = time.perf_counter()
     h_chart, h_reason = heuristic_pick(kind, facts)
-    base = {"chart": h_chart, "reason": h_reason, "source": "heuristic", "allowed": list(ALLOWED)}
+    base: dict[str, Any] = {"chart": h_chart, "reason": h_reason, "source": "heuristic", "allowed": list(ALLOWED)}
 
     api_key = getattr(s, "active_api_key", "") or s.google_api_key
     if not (use_llm and s.chart_picker_enabled):

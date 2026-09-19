@@ -4,6 +4,7 @@ from __future__ import annotations
 import gc
 import time
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -57,7 +58,7 @@ def regression_metrics(y: np.ndarray, yhat: np.ndarray) -> dict:
     ss_tot = float(np.sum((y - y.mean()) ** 2))
     r2 = float(1 - np.sum(err ** 2) / ss_tot) if ss_tot > 0 else None
     return {"rmspe": rmspe, "mae": float(np.mean(np.abs(err))), "rmse": float(np.sqrt(np.mean(err ** 2))),
-            "r2": r2, "n": int(len(y)), "n_zero_actuals_excluded_from_rmspe": int((~nz).sum())}
+            "r2": r2, "n": len(y), "n_zero_actuals_excluded_from_rmspe": int((~nz).sum())}
 
 
 # --------------------------------------------------------------------------- model wrapper
@@ -66,12 +67,12 @@ def regression_metrics(y: np.ndarray, yhat: np.ndarray) -> dict:
 @dataclass
 class _Model:
     name: str
-    est: object
+    est: Any
     log_target: bool
     feature_names: list[str]
     linear_weights: np.ndarray | None = None
     linear_bias: float | None = None
-    booster: object | None = None
+    booster: Any | None = None
 
     def predict(self, X: pd.DataFrame, nonneg: bool) -> np.ndarray:
         if self.name == "ridge" and self.linear_weights is not None:
@@ -137,7 +138,7 @@ def run_forecast(prep: fp.PreparedSeries, horizon: int | None = None) -> dict:
     cfg, y_s = prep.cfg, prep.y
     n = len(y_s)
     lags, wins, holdout = fp.select_lags(cfg, n)          # may raise SeriesTooShort
-    h = int(min(max(horizon or cfg.default_horizon, 1), cfg.max_horizon))
+    h = min(max(horizon or cfg.default_horizon, 1), cfg.max_horizon)
     nonneg = bool(y_s.min() >= 0)
     log_target = nonneg
 
@@ -178,7 +179,7 @@ def run_forecast(prep: fp.PreparedSeries, horizon: int | None = None) -> dict:
     else:
         final = models[sel]
 
-    last_p = y_s.index.to_period(cfg.period)[-1]
+    last_p = y_s.index[-1].to_period(cfg.period)
     future_idx = pd.PeriodIndex([last_p + k for k in range(1, h + 1)]).to_timestamp()
     ext_x = (pd.concat([prep.exog, pd.DataFrame(np.nan, index=future_idx, columns=prep.exog.columns)])
              .ffill().bfill().fillna(0.0) if len(prep.exog.columns) else pd.DataFrame(index=future_idx))
@@ -257,7 +258,7 @@ def run_forecast(prep: fp.PreparedSeries, horizon: int | None = None) -> dict:
     result = {
         "status": "ok",
         "dataset": {"date_column": prep.date_col, "target": prep.target, "frequency": cfg.name,
-                    "date_format": prep.date_format, "n_periods": int(n),
+                    "date_format": prep.date_format, "n_periods": n,
                     "start": y_s.index[0].date().isoformat(), "end": y_s.index[-1].date().isoformat()},
         "series": {"dates": [d.date().isoformat() for d in y_s.index[-tail:]],
                    "actuals": [round(float(v), 4) for v in y_s.iloc[-tail:]]},
@@ -273,8 +274,8 @@ def run_forecast(prep: fp.PreparedSeries, horizon: int | None = None) -> dict:
         "metrics": metrics,
         "selected_model": sel,
         "skill_vs_seasonal_naive": None if skill is None else round(float(skill), 4),
-        "features": {"lags": lags, "rolling_windows": wins, "holdout_periods": int(holdout),
-                     "n_features": int(F_all.shape[1] + len(lookups)),
+        "features": {"lags": lags, "rolling_windows": wins, "holdout_periods": holdout,
+                     "n_features": F_all.shape[1] + len(lookups),
                      "exogenous_columns_lagged_1": list(prep.exog.columns)},
         "preprocessing": {"dropped_columns": [{"name": k, "reason": v} for k, v in prep.dropped.items()],
                           "categorical_candidates": prep.categorical_candidates,
@@ -285,7 +286,5 @@ def run_forecast(prep: fp.PreparedSeries, horizon: int | None = None) -> dict:
                       "compute_total": round((time.perf_counter() - t0) * 1000, 1)},
     }
     del F_all, F_enc, models
-    if "F_full" in locals():
-        del F_full
     gc.collect()
     return result
