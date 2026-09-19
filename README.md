@@ -42,4 +42,9 @@ Foresight is an intelligent forecasting system consisting of multiple predictive
 ### Architectural & Governance Invariants
 - **Continuous Documentation Standard**: Codified Section 6 in `AGENTS.md` and `GEMINI.md` establishing a mandatory project rule that all plans, walkthroughs, defects, architectural updates, function adjustments, and setup instructions must be continuously logged and maintained directly in `README.md`.
 
+### Configuration & Environment
+- **Settings & Config (Pydantic v2)**: Refactored `backend/config/settings.py` to use `pydantic_settings.SettingsConfigDict`. 
+- **Google AI Studio Integration**: Added `GOOGLE_API_KEY`, `GEMINI_API_KEY`, and `LLM_MODEL` defaults (Gemini 3.8 Flash) along with `active_api_key` accessor properties.
+- **Environment Templates**: Created `backend/.env.example` as a template for project constants (`UPLOAD_MAX_SIZE_BYTES=52428800` overriding the legacy `MAX_FILE_SIZE_MB`, `CORS_ORIGINS`, `ENABLE_RATE_LIMITING`).
+
 *(This file will be continually updated with upcoming architectural changes and features.)*
