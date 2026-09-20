@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import gc
 import time
-from typing import Optional
+from typing import Any, Dict, Optional, Tuple, cast
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -51,7 +51,9 @@ def _load(raw: bytes, name: str):
     return sanitize_tabular_cells(df)
 
 
-def _forecast_job(raw: bytes, name: str, target: Optional[str], date_col: Optional[str], horizon: Optional[int]):
+def _forecast_job(
+    raw: bytes, name: str, target: Optional[str], date_col: Optional[str], horizon: Optional[int]
+) -> Tuple[Dict[str, Any], Tuple[float, float, float]]:
     t0 = time.perf_counter()
     df = _load(raw, name)
     t_load = time.perf_counter()
@@ -73,6 +75,7 @@ def _forecast_job(raw: bytes, name: str, target: Optional[str], date_col: Option
 
 
 @router.post("/forecast")
+@root_router.post("/forecast")
 async def forecast(file: UploadFile = File(...), target: str | None = Form(None),
                    date_col: str | None = Form(None), horizon: int | None = Form(None),
                    use_llm: bool = Form(True)):
@@ -80,23 +83,30 @@ async def forecast(file: UploadFile = File(...), target: str | None = Form(None)
         s = get_settings()
         raw = await _read_and_validate_upload(file, s.max_upload_bytes)
         try:
-            res, _ = await run_in_threadpool(_forecast_job, raw, file.filename or "", target, date_col, horizon)
+            job_result = await run_in_threadpool(_forecast_job, raw, file.filename or "", target, date_col, horizon)
+            res: Dict[str, Any] = cast(Dict[str, Any], job_result[0])
         finally:
             del raw
             gc.collect()
 
-        facts = {"status": res["status"]}
+        facts: Dict[str, Any] = {"status": res["status"]}
         if res["status"] == "ok":
-            facts.update(frequency=res["dataset"]["frequency"], n_periods=res["dataset"]["n_periods"],
-                         horizon=res["forecast"]["horizon"], skill_vs_seasonal_naive=res["skill_vs_seasonal_naive"])
-            tm = res["timing_ms"]
+            dataset: Dict[str, Any] = res["dataset"]
+            forecast_data: Dict[str, Any] = res["forecast"]
+            facts.update(
+                frequency=dataset["frequency"],
+                n_periods=dataset["n_periods"],
+                horizon=forecast_data["horizon"],
+                skill_vs_seasonal_naive=res.get("skill_vs_seasonal_naive"),
+            )
+            tm: Dict[str, Any] = res["timing_ms"]
             tm["budget"] = s.latency_budget_ms
             tm["within_budget"] = bool(tm["compute_total"] <= s.latency_budget_ms)
         res["recommended_visualization"] = await pick_chart("forecast", facts, use_llm=use_llm)
         return res
 
 
-def _hypo_job(raw: bytes, name: str, target: Optional[str], group_cols: Optional[list[str]]):
+def _hypo_job(raw: bytes, name: str, target: Optional[str], group_cols: Optional[list[str]]) -> Dict[str, Any]:
     df = _load(raw, name)
     try:
         return run_hypotheses(df, target=target, group_cols=group_cols)
@@ -107,6 +117,7 @@ def _hypo_job(raw: bytes, name: str, target: Optional[str], group_cols: Optional
 
 
 @router.post("/hypotheses")
+@root_router.post("/hypotheses")
 async def hypotheses(file: UploadFile = File(...), target: str | None = Form(None),
                      group_cols: str | None = Form(None, description="Comma-separated column names"),
                      use_llm: bool = Form(True)):
@@ -115,14 +126,18 @@ async def hypotheses(file: UploadFile = File(...), target: str | None = Form(Non
         raw = await _read_and_validate_upload(file, s.max_upload_bytes)
         groups = [g.strip() for g in group_cols.split(",") if g.strip()] if group_cols else None
         try:
-            res = await run_in_threadpool(_hypo_job, raw, file.filename or "", target, groups)
+            job_result = await run_in_threadpool(_hypo_job, raw, file.filename or "", target, groups)
+            res: Dict[str, Any] = cast(Dict[str, Any], job_result)
         finally:
             del raw
             gc.collect()
 
-        tests = res.get("tests", [])
-        facts = {"status": res["status"], "n_tests": len(tests),
-                 "test_types": sorted({t["test"] for t in tests}),
-                 "n_significant": sum(t["significant"] for t in tests)}
+        tests: list[Dict[str, Any]] = res.get("tests", [])
+        facts: Dict[str, Any] = {
+            "status": res["status"],
+            "n_tests": len(tests),
+            "test_types": sorted({t["test"] for t in tests}),
+            "n_significant": sum(bool(t.get("significant")) for t in tests),
+        }
         res["recommended_visualization"] = await pick_chart("hypotheses", facts, use_llm=use_llm)
         return res

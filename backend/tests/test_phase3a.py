@@ -130,6 +130,33 @@ def test_hypotheses_endpoint(wholesale_df):
     assert r.status_code == 200 and len(j["tests"]) == 2 and j["recommended_visualization"]["chart"] == "bar_comparison"
 
 
+def test_root_endpoints_mounted_and_gatekept(bike_df, wholesale_df):
+    """Assert POST /forecast and POST /hypotheses root aliases work behind Phase 2 gatekeeper."""
+    # 1. Root /forecast rejects disallowed extension (Phase 2 gatekeeper)
+    r_bad = client.post("/forecast", files={"file": ("malware.bin", b"binary")})
+    assert r_bad.status_code == 415
+
+    # 2. Root /forecast accepts valid data and returns 200 with forecast
+    r_fc = client.post("/forecast", files={"file": ("day.csv", to_csv_bytes(bike_df))},
+                       data={"target": "cnt", "horizon": "7", "use_llm": "false"})
+    assert r_fc.status_code == 200
+    j_fc = r_fc.json()
+    assert j_fc["status"] == "ok"
+    assert len(j_fc["forecast"]["values"]) == 7
+
+    # 3. Root /hypotheses rejects disallowed extension (Phase 2 gatekeeper)
+    r_bad_hyp = client.post("/hypotheses", files={"file": ("bad.exe", b"MZ")})
+    assert r_bad_hyp.status_code == 415
+
+    # 4. Root /hypotheses accepts valid data and returns 200 with tests
+    r_hyp = client.post("/hypotheses", files={"file": ("w.csv", to_csv_bytes(wholesale_df))},
+                        data={"target": "Fresh", "group_cols": "Channel,Region", "use_llm": "false"})
+    assert r_hyp.status_code == 200
+    j_hyp = r_hyp.json()
+    assert j_hyp["status"] == "ok"
+    assert len(j_hyp["tests"]) == 2
+
+
 # ------------------------------------------------------------------ chart picker
 def _s(key="k"):
     return Settings(google_api_key=key, llm_model="gemini-3.8-flash")

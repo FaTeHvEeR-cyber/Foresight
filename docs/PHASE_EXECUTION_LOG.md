@@ -13,7 +13,7 @@
 | :--- | :--- | :---: | :--- | :---: |
 | **Phase 1** | Ingestion, Validation & Sanitization (MIME sniffing, magic bytes, formula injection, size guard) | **100%** | 80 tests passing | **PASSED & CERTIFIED** |
 | **Phase 2** | Offline Baseline Modeling & Pipelines (Engine A Ridge/XGBoost/MLP, Engine B KMeans/IForest) | **100%** | 100 tests passing, 10 `.joblib` artifacts (2.53 MB) | **PASSED & CERTIFIED** |
-| **Phase 3A** | Stateless In-Memory Analytics API (`/forecast`, `/hypotheses`, dual regressor, chart picker) | **100%** | 56 tests passing (unit, real benchmarks, adversarial), 236 total | **PASSED & CLOSED** |
+| **Phase 3A** | Stateless In-Memory Analytics API (`/forecast`, `/hypotheses`, dual regressor, chart picker) | **100%** | 89 tests passing (unit, root alias, real benchmarks, adversarial, security), 269 total | **PASSED & CLOSED** |
 | **Phase 3B** | Unsupervised Segmentation & Anomaly API (`/segmentation`, KMeans, PCA 2D, 5% IForest review queue) | **0%** | Briefed; awaiting kickoff & user configuration | **PENDING KICKOFF** |
 | **Phase 4** | Frontend User Interface & Interactive Dashboards (Next.js, Tailwind, Recharts, drag-and-drop) | **0%** | Endpoint contract published; blocked on Phase 3B | **BLOCKED ON 3B** |
 
@@ -25,7 +25,7 @@ All twelve core architectural, performance, and governance criteria have been ve
 
 | # | Exit-Gate Criterion | Target Specification | Empirical Verified Result | Status |
 | :-: | :--- | :--- | :--- | :---: |
-| **1** | **Combined Test Suite Pass Rate** | Zero regressions across baseline and Phase 3A suites | **236 / 236 tests passed** (100% green across unit, real-data, and adversarial suites) | **PASSED** |
+| **1** | **Combined Test Suite Pass Rate** | Zero regressions across baseline and Phase 3A suites | **269 / 269 tests passed** (100% green across unit, root alias, real-data, adversarial, and security suites) | **PASSED** |
 | **2** | **Artifact Footprint Ceiling** | Combined size $\le 50.0$ MB (`joblib.dump(..., compress=3)`) | **2.53 MB** total across 10 artifacts (5.1% utilization, **47.47 MB headroom**) | **PASSED** |
 | **3** | **Model Compute Latency Budget** | Compute latency $\le 200$ ms per inference request ($\le 100$ ms target) | Bike: **p50 = 109.7 ms**; Airline: **p50 = 52.7 ms**; Retail: **p50 = 61.6 ms** | **PASSED** |
 | **4** | **Rossmann Promo Lift Parity** | Welch t-test lift within $\pm 2.0\%$ points of Phase 2.5 (38.70%) | **38.77%** ($t = -356.64$, $p < 10^{-100}$, $\Delta = 0.07\%$ points) | **PASSED** |
@@ -148,7 +148,7 @@ Phase 3A delivered a production-ready, zero-auth, stateless analytics platform e
   - [x] Gemini 3.8 Flash chart picker with zero tabular data transmission.
   - [x] Deterministic heuristic fallback under timeouts, rate limits, or API errors.
 - [x] **R4. Verification, Benchmarks & Regression Quality**:
-  - [x] 236/236 tests passing across all suites with zero regressions.
+  - [x] 269/269 tests passing across all suites with zero regressions (including root-level `/forecast` and `/hypotheses` aliases).
   - [x] Airline Passengers benchmark: monthly frequency, seasonal lag 12, positive skill score.
   - [x] Bike Sharing benchmark: daily frequency, leakage defense verified, positive holdout $R^2$.
   - [x] UCI Online Retail benchmark: 49.5 MB file passes 50 MB gate, Latin-1 decoded, cancellations dropped.
