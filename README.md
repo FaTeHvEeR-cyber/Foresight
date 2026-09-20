@@ -59,6 +59,7 @@ Foresight is an intelligent forecasting system consisting of multiple predictive
 
 ### Architectural & Governance Invariants
 - **Continuous Documentation Standard**: Codified Section 6 in `AGENTS.md` and `GEMINI.md` establishing a mandatory project rule that all plans, walkthroughs, defects, architectural updates, function adjustments, and setup instructions must be continuously logged and maintained directly in `README.md`.
+- **Multi-Agent Sync Points**: Codified Section 7 in `AGENTS.md` and `GEMINI.md` detailing sync constraints for teamwork execution. Agent 1 (Integration Lead) merges and clears test suites first. Agents 2, 3, and 4 draft in parallel but rebase on Agent 1 before running final tests. Code boundaries are strictly enforced (no direct cross-edits; instead use written bug reports back to the file owner). Agent 1 uniquely owns `feature_pipeline.py` and `forecast_engine.py`. Agent 5 runs last.
 
 ### Configuration & Environment
 - **Settings & Config (Pydantic v2)**: Configured `backend/config/settings.py` with Phase 3A properties (`LATENCY_BUDGET_MS=200`, `LLM_TIMEOUT_S=2.5`, `CHART_PICKER_ENABLED=True`, `max_upload_bytes=52428800`).

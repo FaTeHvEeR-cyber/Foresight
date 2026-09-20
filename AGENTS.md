@@ -54,3 +54,12 @@ These rules establish universal guardrails, data policies, and serialization sta
   - **Defect Logs & Bug Fixes**: Root causes, corrective actions, and preventative changes.
   - **Plans, Walkthroughs & Setup**: Step-by-step setup instructions, verification results, and operational runbooks.
 - **Execution Lifecycle**: Updating and logging in `README.md` is a required completion criterion for every code or configuration change.
+
+---
+
+## 7. Teamwork & Sync Points
+- **Sync Point 1**: Agent 1 (Integration Lead) finishes merge and green suite FIRST. Other agents may draft in parallel but must rebase on Agent 1's work before running final tests.
+- **Parallel Execution**: Agents 2, 3, 4 run in parallel after sync point 1.
+- **File Ownership**: No agent edits another's files. Cross-agent bugs go back to the owner as a written note, not a drive-by edit.
+- **Core Pipeline Ownership**: Changes to `feature_pipeline.py` or `forecast_engine.py` are made by one designated owner (Agent 1) and re-tested by all.
+- **Final Sync**: Agent 5 runs last.
