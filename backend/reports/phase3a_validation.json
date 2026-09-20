@@ -1,0 +1,371 @@
+{
+  "metadata": {
+    "agent": "Agent 2 \u2014 Real-Dataset Validation",
+    "timestamp": "2026-09-20T16:02:37.815313+00:00",
+    "python_version": "3.14.3 (tags/v3.14.3:323c59a, Feb  3 2026, 16:04:56) [MSC v.1944 64 bit (AMD64)]",
+    "platform": "win32",
+    "budget_ms": 200
+  },
+  "datasets": {
+    "day.csv": {
+      "status": "PASSED",
+      "file": "day.csv",
+      "assertions": {
+        "date_format_detected_day_first": true,
+        "instant_dropped_as_id": true,
+        "casual_registered_dropped_leakage_prevented": true,
+        "forecast_returns_valid": true,
+        "no_leakage_warning": true
+      },
+      "details": {
+        "date_format": "day-first",
+        "dropped_columns": {
+          "instant": "ID / row counter",
+          "casual": "'cnt' = 'casual' + 'registered' (target component)",
+          "registered": "'cnt' = 'casual' + 'registered' (target component)"
+        },
+        "forecast_horizon": 14,
+        "selected_model": "xgboost"
+      },
+      "latency": {
+        "api_endpoint": {
+          "runs": 20,
+          "p50_ms": 473.22,
+          "p95_ms": 721.81,
+          "mean_ms": 514.03,
+          "min_ms": 400.61,
+          "max_ms": 865.99,
+          "raw_ms": [
+            400.61,
+            438.6,
+            468.87,
+            427.75,
+            539.67,
+            405.5,
+            865.99,
+            609.79,
+            465.25,
+            477.56,
+            541.86,
+            458.14,
+            460.96,
+            595.77,
+            486.51,
+            456.82,
+            514.32,
+            714.22,
+            497.23,
+            455.12
+          ]
+        },
+        "model_compute": {
+          "runs": 20,
+          "p50_ms": 109.7,
+          "p95_ms": 161.61,
+          "mean_ms": 116.6,
+          "min_ms": 97.5,
+          "max_ms": 165.5,
+          "raw_ms": [
+            98.2,
+            101.0,
+            111.2,
+            106.1,
+            138.3,
+            98.5,
+            97.5,
+            161.4,
+            115.7,
+            123.8,
+            120.1,
+            104.3,
+            107.7,
+            106.5,
+            128.5,
+            108.2,
+            122.9,
+            165.5,
+            111.7,
+            105.0
+          ]
+        }
+      }
+    },
+    "airline-passengers.csv": {
+      "status": "PASSED",
+      "file": "airline-passengers.csv",
+      "assertions": {
+        "monthly_frequency_detected": true,
+        "no_day_based_lags_used": true,
+        "short_series_144_rows_handled": true,
+        "seasonal_naive_skill_reported": true
+      },
+      "details": {
+        "frequency": "monthly",
+        "n_periods": 144,
+        "lags": [
+          1,
+          2,
+          3,
+          6,
+          12
+        ],
+        "skill_vs_seasonal_naive": 0.6353,
+        "selected_model": "ridge"
+      },
+      "latency": {
+        "api_endpoint": {
+          "runs": 20,
+          "p50_ms": 405.62,
+          "p95_ms": 492.19,
+          "mean_ms": 413.71,
+          "min_ms": 355.1,
+          "max_ms": 507.25,
+          "raw_ms": [
+            427.0,
+            411.34,
+            486.76,
+            444.36,
+            372.35,
+            383.7,
+            383.12,
+            371.69,
+            362.31,
+            363.5,
+            491.39,
+            389.72,
+            507.25,
+            416.35,
+            458.98,
+            468.51,
+            368.66,
+            399.9,
+            412.29,
+            355.1
+          ]
+        },
+        "model_compute": {
+          "runs": 20,
+          "p50_ms": 52.7,
+          "p95_ms": 99.24,
+          "mean_ms": 57.6,
+          "min_ms": 40.2,
+          "max_ms": 109.5,
+          "raw_ms": [
+            55.2,
+            55.5,
+            71.3,
+            67.3,
+            47.4,
+            52.2,
+            50.3,
+            47.6,
+            47.2,
+            47.4,
+            109.5,
+            46.8,
+            55.1,
+            61.8,
+            53.2,
+            98.7,
+            40.2,
+            56.8,
+            42.6,
+            45.9
+          ]
+        }
+      }
+    },
+    "online_retail.csv": {
+      "status": "PASSED",
+      "file": "online_retail.csv",
+      "assertions": {
+        "passes_50mb_gate": true,
+        "loads_with_correct_encoding_latin1": true,
+        "cancellations_filtered": true,
+        "daily_net_revenue_series": true,
+        "cancellation_count_in_data_quality": true,
+        "end_to_end_compute_under_200ms": true
+      },
+      "details": {
+        "file_size_bytes": 49543683,
+        "file_size_mb": 47.25,
+        "rows_in": 541909,
+        "cancellation_rows_dropped": 9288,
+        "cancellation_invoices": 3836,
+        "target": "net_revenue",
+        "frequency": "daily",
+        "load_parse_duration_ms": 1006.33,
+        "api_timing_ms": {
+          "features": 13.4,
+          "validation_fit": 35.7,
+          "refit_and_forecast": 12.0,
+          "compute_total": 61.1,
+          "load_parse": 2695.9,
+          "prepare_series": 1798.6,
+          "budget": 200,
+          "within_budget": true
+        }
+      },
+      "latency": {
+        "model_compute_20_runs": {
+          "runs": 20,
+          "p50_ms": 61.6,
+          "p95_ms": 90.34,
+          "mean_ms": 70.49,
+          "min_ms": 57.5,
+          "max_ms": 195.6,
+          "raw_ms": [
+            59.9,
+            195.6,
+            60.3,
+            58.9,
+            58.9,
+            57.5,
+            60.2,
+            60.9,
+            63.7,
+            65.0,
+            61.2,
+            59.7,
+            60.5,
+            62.0,
+            62.1,
+            62.6,
+            84.8,
+            62.8,
+            75.7,
+            77.6
+          ]
+        },
+        "load_parse_ms_reported_separately": 2695.9,
+        "prepare_series_ms": 1798.6
+      }
+    },
+    "Wholesale_customers_data.csv": {
+      "status": "PASSED",
+      "file": "Wholesale_customers_data.csv",
+      "assertions": {
+        "no_date_column_forecast_returns_clear_non_error": true,
+        "channel_region_detected_as_categorical": true,
+        "welch_t_test_on_channel_2_groups": true,
+        "anova_on_region_3_groups": true,
+        "validated_across_all_spend_columns": true
+      },
+      "details": {
+        "categorical_candidates": [
+          "Channel",
+          "Region"
+        ],
+        "forecast_non_error_message": "No date column detected. Pass `date_col` explicitly.",
+        "spend_columns_tested": [
+          "Fresh",
+          "Milk",
+          "Grocery",
+          "Frozen",
+          "Detergents_Paper",
+          "Delicassen"
+        ],
+        "spend_column_test_summaries": {
+          "Fresh": {
+            "channel_p": 3.9975237911142124e-05,
+            "channel_lift_pct": -33.92,
+            "region_p": 0.3234825880787197
+          },
+          "Milk": {
+            "channel_p": 7.51343272247099e-15,
+            "channel_lift_pct": 210.47,
+            "region_p": 0.6854928588000341
+          },
+          "Grocery": {
+            "channel_p": 3.623878362357256e-23,
+            "channel_lift_pct": 311.97,
+            "region_p": 0.5772387757311568
+          },
+          "Frozen": {
+            "channel_p": 1.265927476458512e-08,
+            "channel_lift_pct": -55.91,
+            "region_p": 0.3465797526230056
+          },
+          "Detergents_Paper": {
+            "channel_p": 5.8093151114454525e-24,
+            "channel_lift_pct": 819.54,
+            "region_p": 0.45499320702217927
+          },
+          "Delicassen": {
+            "channel_p": 0.1694754589079315,
+            "channel_lift_pct": 23.83,
+            "region_p": 0.4897525729784898
+          }
+        }
+      },
+      "latency": {
+        "forecast_no_date_api": {
+          "runs": 20,
+          "p50_ms": 222.01,
+          "p95_ms": 274.17,
+          "mean_ms": 231.87,
+          "min_ms": 201.98,
+          "max_ms": 353.87,
+          "raw_ms": [
+            227.29,
+            227.17,
+            208.81,
+            249.04,
+            219.18,
+            201.98,
+            208.25,
+            353.87,
+            228.83,
+            222.43,
+            221.6,
+            269.97,
+            219.93,
+            221.34,
+            220.7,
+            220.25,
+            220.69,
+            226.86,
+            231.12,
+            238.18
+          ]
+        },
+        "hypotheses_api": {
+          "runs": 20,
+          "p50_ms": 231.18,
+          "p95_ms": 275.06,
+          "mean_ms": 246.8,
+          "min_ms": 218.49,
+          "max_ms": 464.76,
+          "raw_ms": [
+            243.7,
+            464.76,
+            218.67,
+            227.25,
+            221.74,
+            218.49,
+            219.1,
+            219.43,
+            246.2,
+            256.58,
+            265.08,
+            238.02,
+            229.06,
+            245.44,
+            230.64,
+            237.42,
+            263.92,
+            231.3,
+            228.06,
+            231.06
+          ]
+        }
+      }
+    }
+  },
+  "summary": {
+    "total_datasets": 4,
+    "passed": 4,
+    "failed": 0,
+    "all_passed": true
+  }
+}

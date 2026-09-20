@@ -433,3 +433,82 @@ def fit_mean_lookup(y: np.ndarray, cat: np.ndarray, m: float = 10.0) -> tuple[di
 def encode_columns(cfg: FreqConfig) -> list[tuple[str, str]]:
     """(feature_name, source_calendar_column) pairs that get mean encoding."""
     return [("enc_dow", "dow"), ("enc_month", "month")] if cfg.label == "D" else [("enc_month", "month")]
+
+
+# --- shared multi-store offline & benchmark feature engineering -----------------
+
+LAG_PERIODS: list[int] = [7, 14, 21, 30]
+ROLLING_WINDOWS: list[int] = [7, 14, 30]
+RMSPE_MIN_DEMAND_THRESHOLD: float = 50.0
+
+
+def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply time-aware feature engineering without temporal leakage.
+
+    1. Sorts chronologically per store (store_id, date).
+    2. Constructs lag features t-7, t-14, t-21, t-30 on target units_sold.
+    3. Computes rolling statistics (mean, std) using strictly past data (shift(1))
+       to guarantee no target leakage into the predictor features.
+    4. Extracts calendar features and cyclical sine/cosine encodings.
+    5. Drops rows containing NaN lag values from the initial lookback window.
+    """
+    data = df.copy()
+    if not pd.api.types.is_datetime64_any_dtype(data["date"]):
+        data["date"] = pd.to_datetime(data["date"])
+    data = data.sort_values(["store_id", "date"]).reset_index(drop=True)
+
+    # 1. Lag features per store: t-7, t-14, t-21, t-30
+    for lag in LAG_PERIODS:
+        data[f"lag_{lag}"] = data.groupby("store_id")["units_sold"].shift(lag)
+
+    # 2. Rolling statistics per store: strictly past data using shift(1)
+    # Using shift(1) ensures observation at time t is never used to compute feature at time t
+    for w in ROLLING_WINDOWS:
+        data[f"rolling_mean_{w}"] = data.groupby("store_id")["units_sold"].transform(
+            lambda s, w=w: s.shift(1).rolling(window=w, min_periods=1).mean()
+        )
+        data[f"rolling_std_{w}"] = data.groupby("store_id")["units_sold"].transform(
+            lambda s, w=w: s.shift(1).rolling(window=w, min_periods=1).std()
+        ).fillna(0.0)
+
+    # 3. Calendar encodings
+    data["day_of_week"] = data["date"].dt.dayofweek  # type: ignore[attr-defined]
+    data["day_of_month"] = data["date"].dt.day  # type: ignore[attr-defined]
+    data["month"] = data["date"].dt.month  # type: ignore[attr-defined]
+    data["day_of_year"] = data["date"].dt.dayofyear  # type: ignore[attr-defined]
+    data["is_weekend"] = (data["day_of_week"] >= 5).astype(int)
+
+    # Cyclical trigonometric encodings
+    data["sin_dow"] = np.sin(2 * np.pi * data["day_of_week"] / 7.0)
+    data["cos_dow"] = np.cos(2 * np.pi * data["day_of_week"] / 7.0)
+    data["sin_month"] = np.sin(2 * np.pi * data["month"] / 12.0)
+    data["cos_month"] = np.cos(2 * np.pi * data["month"] / 12.0)
+    data["sin_doy"] = np.sin(2 * np.pi * data["day_of_year"] / 365.25)
+    data["cos_doy"] = np.cos(2 * np.pi * data["day_of_year"] / 365.25)
+
+    # 4. Drop initial rows with NaNs resulting from max lookback (lag 30)
+    data_clean = data.dropna().reset_index(drop=True)
+    return data_clean
+
+
+def compute_rmspe(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    min_demand_threshold: float = RMSPE_MIN_DEMAND_THRESHOLD,
+) -> float:
+    """Compute Root Mean Square Percentage Error (RMSPE) in percent.
+
+    Formula: sqrt(mean(((y_true - y_pred) / y_true) ** 2)) * 100%
+    Restricted to rows where the true value y_true >= min_demand_threshold (default: 50.0)
+    to exclude anomaly-injected extreme values and naturally low-demand rows
+    that distort percentage-error metrics via division by near-zero.
+    Safely returns 0.0 if no valid rows exist.
+    """
+    y_t = np.asarray(y_true, dtype=float)
+    y_p = np.asarray(y_pred, dtype=float)
+    mask = y_t >= min_demand_threshold
+    if not np.any(mask):
+        return 0.0
+    relative_errors = (y_t[mask] - y_p[mask]) / y_t[mask]
+    return float(np.sqrt(np.mean(np.square(relative_errors))) * 100.0)
+

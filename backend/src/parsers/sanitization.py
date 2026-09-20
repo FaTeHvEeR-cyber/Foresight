@@ -12,6 +12,7 @@ Provides:
 """
 
 from typing import Any, Dict, Optional, Set, Union
+from fastapi import HTTPException
 import pandas as pd
 
 try:
@@ -259,14 +260,14 @@ def sanitize_tabular_cells(
     method: str = "quote",
     strip_prefix: Optional[bool] = None,
 ) -> pd.DataFrame:
-    """Sanitize tabular DataFrame cells against formula injection attacks (CWE-1236).
+    """Sanitize tabular DataFrame cells and headers against formula injection attacks (CWE-1236).
 
-    Inspects string cell values and neutralizes dangerous formula-injection prefixes
+    Inspects string cell values and column headers, neutralizing dangerous formula-injection prefixes
     (=, @, +, -) per spec §4.2 by either prepending a single quote (') or stripping
     the leading character.
 
-    Only applies to tabular data string cells. Numeric, boolean, datetime, and null
-    values are preserved without alteration. The original DataFrame is not mutated.
+    Only applies to tabular data string cells and string column headers. Numeric, boolean, datetime,
+    and null values are preserved without alteration. The original DataFrame is not mutated.
 
     Args:
         df: Input pandas DataFrame.
@@ -298,6 +299,12 @@ def sanitize_tabular_cells(
 
     sanitized_df = df.copy()
 
+    # Neutralize dangerous formula prefixes in column headers
+    sanitized_df.columns = [
+        _sanitize_val(col) if isinstance(col, str) else col
+        for col in sanitized_df.columns
+    ]
+
     for col in sanitized_df.columns:
         series = sanitized_df[col]
 
@@ -320,3 +327,129 @@ def sanitize_tabular_cells(
             sanitized_df[col] = series.map(_sanitize_val)
 
     return sanitized_df
+
+
+# Magic byte constants for Phase 2 security gatekeeper
+PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+PARQUET_MAGIC = b"PAR1"
+ZIP_MAGIC = b"\x50\x4b\x03\x04"
+XLS_OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+TABULAR_ALLOWED_EXTENSIONS: Set[str] = {"csv", "tsv", "xlsx", "xls", "parquet", "txt"}
+
+
+def check_dangerous_and_magic_bytes(content: bytes, ext: str) -> None:
+    """Detect and reject dangerous executable headers or corrupted format magic bytes."""
+    if content.startswith(b"MZ"):
+        raise HTTPException(
+            status_code=415,
+            detail="Disallowed binary signature detected: Windows executable (Executable binaries disallowed)",
+        )
+    if content.startswith(b"\x7fELF"):
+        raise HTTPException(
+            status_code=415,
+            detail="Disallowed binary signature detected: Linux ELF (Executable binaries disallowed)",
+        )
+    if content.startswith(b"#!"):
+        raise HTTPException(
+            status_code=415,
+            detail="Disallowed binary signature detected: Script / shell executable (Executable binaries disallowed)",
+        )
+    if content.startswith(PNG_MAGIC):
+        raise HTTPException(
+            status_code=415,
+            detail="Disallowed binary signature detected: PNG image (disallowed)",
+        )
+
+    # Format-specific magic checks
+    if ext == "parquet":
+        if not content.startswith(PARQUET_MAGIC):
+            raise HTTPException(
+                status_code=415,
+                detail="Missing PAR1 magic byte signature",
+            )
+    elif ext == "xlsx":
+        if not content.startswith(ZIP_MAGIC):
+            raise HTTPException(
+                status_code=415,
+                detail="Invalid ZIP archive: missing Office Open XML ZIP header",
+            )
+    elif ext == "xls":
+        if not content.startswith(XLS_OLE_MAGIC):
+            raise HTTPException(
+                status_code=415,
+                detail="Corrupted or invalid XLS file (missing OLE header)",
+            )
+    elif ext in ("csv", "tsv", "txt"):
+        if b"\x00" in content:
+            raise HTTPException(
+                status_code=415,
+                detail="Contains null byte binary data: Binary or malformed content detected (disallowed).",
+            )
+
+
+def gatekeep_tabular_upload(
+    filename: str,
+    content: bytes,
+    content_type: Optional[str] = None,
+    max_bytes: Optional[int] = None,
+) -> str:
+    """Phase 2 Security Gatekeeper for tabular file uploads.
+
+    Enforces:
+    - 50 MB HTTP 413 guardrail (and 0-byte HTTP 422 rejection)
+    - Tabular extension whitelist & MIME consistency (HTTP 415)
+    - Magic byte inspection and dangerous binary rejection (HTTP 415)
+
+    Returns:
+        str: Normalized lowercase file extension.
+    """
+    if max_bytes is None:
+        max_bytes = getattr(settings, "max_upload_bytes", 50 * 1024 * 1024)
+
+    # 1. Size guardrail: 50MB HTTP 413 (and 0-byte HTTP 422)
+    if len(content) > max_bytes:
+        max_mb = max_bytes // (1024 * 1024)
+        file_mb = len(content) / (1024 * 1024)
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds the {max_mb}MB limit ({file_mb:.2f} MB uploaded, max is {max_mb} MB).",
+        )
+    if len(content) == 0:
+        raise HTTPException(
+            status_code=422,
+            detail="Empty file uploaded (0 bytes). Foresight requires valid non-empty files.",
+        )
+
+    # 2. Extension validation
+    clean_filename = (filename or "").strip()
+    if not clean_filename or "." not in clean_filename:
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported file format: File '{clean_filename}' has no valid extension. Foresight requires a valid extension (disallowed).",
+        )
+
+    ext = clean_filename.rsplit(".", 1)[-1].strip().lower()
+    if ext not in TABULAR_ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported file extension or non-tabular format '.{ext}' (disallowed). "
+            f"Accepted tabular formats: {', '.join(sorted(TABULAR_ALLOWED_EXTENSIONS))}.",
+        )
+
+    # 3. Declared MIME consistency (defense against renamed files)
+    if content_type:
+        clean_mime = content_type.split(";")[0].strip().lower()
+        if clean_mime and clean_mime not in ("application/octet-stream", "multipart/form-data"):
+            compatible_mimes = EXTENSION_TO_ALLOWED_MIMES.get(ext, set())
+            if compatible_mimes and clean_mime not in compatible_mimes:
+                raise HTTPException(
+                    status_code=415,
+                    detail=f"Declared MIME type '{clean_mime}' disagrees with file extension '.{ext}'. "
+                    f"Expected one of: {', '.join(sorted(compatible_mimes))}.",
+                )
+
+    # 4. Magic bytes & dangerous binary headers
+    check_dangerous_and_magic_bytes(content, ext)
+
+    return ext
+

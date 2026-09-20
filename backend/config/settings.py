@@ -5,6 +5,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    # App Metadata
+    APP_NAME: str = "Foresight Backend"
+    APP_VERSION: str = "0.2.0"
+    DEBUG: bool = False
+
+    # Ephemeral in-memory session TTL (1 hour)
+    SESSION_TTL_SECONDS: int = 3600
+
     # API Keys & Models
     GOOGLE_API_KEY: str = ""
     GEMINI_API_KEY: str = ""
@@ -14,6 +22,10 @@ class Settings(BaseSettings):
     # Guardrails
     MAX_FILE_SIZE_MB: int = 50
     UPLOAD_MAX_SIZE_BYTES: int = 50 * 1024 * 1024
+
+    # File format categories
+    TABULAR_EXTENSIONS: Set[str] = {"csv", "tsv", "xlsx", "xls", "parquet"}
+    DOCUMENT_EXTENSIONS: Set[str] = {"pdf", "docx", "txt", "md"}
 
     # Allowed Extensions Whitelist
     ALLOWED_EXTENSIONS: Set[str] = {
@@ -52,6 +64,8 @@ class Settings(BaseSettings):
     CORS_ORIGINS: list[str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
     ]
 
     # Phase 3A Analytics & Chart Picker
