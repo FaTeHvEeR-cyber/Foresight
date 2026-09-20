@@ -25,6 +25,7 @@ from src.orchestrator.chart_picker import pick_chart
 from src.parsers.sanitization import gatekeep_tabular_upload, sanitize_tabular_cells
 
 router = APIRouter(prefix="/api/v1", tags=["analytics"])
+root_router = APIRouter(tags=["analytics"])
 
 
 async def _read_and_validate_upload(file: UploadFile, limit: int) -> bytes:
