@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import gc
 import time
-from typing import Any, Dict, Optional, Tuple, cast
+from typing import Any, Dict, Optional, Tuple
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -84,7 +84,7 @@ async def forecast(file: UploadFile = File(...), target: str | None = Form(None)
         raw = await _read_and_validate_upload(file, s.max_upload_bytes)
         try:
             job_result = await run_in_threadpool(_forecast_job, raw, file.filename or "", target, date_col, horizon)
-            res: Dict[str, Any] = cast(Dict[str, Any], job_result[0])
+            res: Dict[str, Any] = job_result[0]
         finally:
             del raw
             gc.collect()
@@ -127,7 +127,7 @@ async def hypotheses(file: UploadFile = File(...), target: str | None = Form(Non
         groups = [g.strip() for g in group_cols.split(",") if g.strip()] if group_cols else None
         try:
             job_result = await run_in_threadpool(_hypo_job, raw, file.filename or "", target, groups)
-            res: Dict[str, Any] = cast(Dict[str, Any], job_result)
+            res: Dict[str, Any] = job_result
         finally:
             del raw
             gc.collect()

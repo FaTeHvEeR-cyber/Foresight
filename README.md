@@ -54,6 +54,7 @@ Foresight is an intelligent forecasting system consisting of multiple predictive
   - Resolved absolute import mapping errors in `tabular_parser.py` (`backend.src.models` -> `src.models`).
   - Addressed ExtensionArray limitations by explicitly coercing subset masks and features to `numpy` arrays via `.to_numpy()` before feeding them to Scikit-Learn pipelines (`Ridge.fit`) and boolean bitwise operations (`~`, `.sum()`).
   - Switched from direct attribute access (e.g., `.n_clusters`, `.n_components`) to `.get_params()` on Scikit-Learn estimators for strict typing compliance.
+  - Eliminated redundant `cast(Dict[str, Any], ...)` calls and pruned unused `cast` import in `analytics_router.py` (`/forecast` and `/hypotheses` handlers).
 - **Linting (Flake8)**: Pruned several unused variables and unnecessary dependencies/imports in the test suite (`test_train_engine_a.py`, `test_train_engine_b_anomaly.py`, `test_upload_endpoint.py`). Removed unnecessary typecasting overhead on columns during tabular parsing. 
 - **Tests**: Suppressed internal third-party warnings (`starlette.testclient`) in `pytest.ini` to keep standard outputs clean. The codebase currently passes all 205 unit and integration tests with zero failures.
 
