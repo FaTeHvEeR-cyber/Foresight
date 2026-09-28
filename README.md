@@ -611,3 +611,10 @@ python backend/scripts/audit_artifact_size.py
 pytest backend/tests/
 ```
 
+
+### Agent 4: Frontend Types and WidgetFactory Initialization
+- Derived ChartType union and RankedVisualization types based on backend chart_registry.py and Phase 4 API contracts.
+- Pushed types early to eat/chart-expansion-10-agent4 for Agents 2 and 3 to build against.
+- Created WidgetFactory dispatcher mapping all 10 chart tokens to placeholder components with a safe fallback to KpiCard.
+- Added tests for WidgetFactory verifying dispatch and fallback behavior.
+- Created chartUtils.ts with shared frontend chart constants and formatters.
