@@ -204,12 +204,17 @@ export interface HypothesisTestResult {
   df: number | [number, number];// Degrees of freedom (float for Welch's, [df1, df2] for ANOVA)
   grouping_column: string;      // Category evaluated (e.g. "Promo")
   target: string;               // Evaluated target metric
-  n_groups: number;             // Number of unique groups evaluated
+  n_groups: number;             // Number of unique groups evaluated (capped at 12 top by n)
   group_stats: Array<{
     group: string;              // Group label (e.g. "0" vs "1", "Control" vs "Treatment")
     n: number;                  // Sample size for this group
     mean: number;               // Group mean
     std: number;                // Group standard deviation
+    min: number;                // Minimum value (0th percentile)
+    q1: number;                 // 25th percentile (1st quartile)
+    median: number;             // 50th percentile (median)
+    q3: number;                 // 75th percentile (3rd quartile)
+    max: number;                // Maximum value (100th percentile)
   }>;
   target_skew: number;          // Fisher-Pearson skewness of target distribution
   skew_warning: boolean;        // true if |skew| > 2.0 (indicates high skewness)

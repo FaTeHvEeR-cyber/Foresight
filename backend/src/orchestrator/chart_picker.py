@@ -34,7 +34,7 @@ def heuristic_pick(kind: str, facts: dict) -> tuple[list[str], str]:
         return ["line_chart", "forecast_band_chart", "kpi_card"], "Time series with a forecast horizon."
     if kind == "hypotheses":
         if facts.get("n_tests", 0) > 0:
-            return ["bar_comparison", "bar_line_combo", "box_plot"], "Group means compared across categories."
+            return ["bar_comparison", "box_plot"], "Group means compared across categories."
         return ["kpi_card"], "No usable tests to chart."
     if kind == "segmentation":
         return (["scatter_cluster", "outlier_table", "heatmap_correlation"], "2D projection of clusters and outliers.") if facts.get("status") == "ok" \

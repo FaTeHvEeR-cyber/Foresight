@@ -17,7 +17,7 @@ interface ForecastBandChartProps {
 }
 
 export function ForecastBandChart({ data }: ForecastBandChartProps) {
-  if (!data || !data.dates || data.dates.length === 0) {
+  if (!data || !Array.isArray(data.dates) || data.dates.length === 0) {
     return <div data-testid="chart-forecast_band_chart">No data available</div>;
   }
 

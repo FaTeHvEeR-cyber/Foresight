@@ -637,3 +637,145 @@ echarts and raw HTML rendering for tables.
   - Backend Tests: 268 before -> 271 after (all passing).
   - Frontend Tests: Evaluated frontend test suite successfully.
 - **Verification**: Complete backend regression suite passing. Frontend builds correctly. Documentation synchronized across README.md and docs/.
+
+---
+
+### Frontend Jest Configuration & Matcher Fix
+- **Architectural & Design Updates**: Added Jest test framework setup file ([`frontend/jest.setup.ts`](file:///d:/Foresight/frontend/jest.setup.ts)) importing `@testing-library/jest-dom` to configure DOM matchers globally across all frontend test suites.
+- **Function & Interface Changes**: Updated [`frontend/jest.config.js`](file:///d:/Foresight/frontend/jest.config.js) to configure `setupFilesAfterEnv: ['<rootDir>/jest.setup.ts']` while preserving `testEnvironment: 'jsdom'`.
+- **Defect Logs & Bug Fixes**: Resolved `TypeError: expect(...).toBeInTheDocument is not a function` in 11 test cases in [`frontend/__tests__/WidgetFactory.test.tsx`](file:///d:/Foresight/frontend/__tests__/WidgetFactory.test.tsx) without modifying test assertions or chart components.
+- **Test Counts Before/After**:
+  - Before: 19 passed, 12 failed (11 matcher failures in `WidgetFactory.test.tsx`, 1 empty-data failure in `agent3.test.tsx`).
+  - After: 30 passed, 1 failed (all 11 matcher failures resolved; the single remaining failure is the empty-data test in `HeatmapCorrelation` owned by Agent 2).
+- **Verification**: Executed `npm test` and `npm run typecheck` in `frontend/`.
+
+---
+
+## Phase 4: Chart Expansion (10-Token) Stabilization & Backend Payload Audit
+
+### 1. Part A: HeatmapCorrelation Defect & Root Cause Resolution
+- **Root Cause Determination**:
+  - The failing test `renders correctly with data and caps variables` in [`frontend/__tests__/agent3.test.tsx`](file:///d:/Foresight/frontend/__tests__/agent3.test.tsx) suffered from a **wrong test setup/assertion**. It passed empty data (`data={[]}`) while expecting the component to render the full matrix capped (`/Showing correlation matrix capped/i`).
+  - Because `data={[]}` has zero data, `HeatmapCorrelation` correctly triggered its empty state (`No correlation data available.`) and refused to render a blank/zero canvas.
+  - Furthermore, `HeatmapCorrelation.tsx` had fragile typing and lacked defensive checks for malformed data (such as non-arrays or objects missing `{ x, y, value }`), which could cause runtime crashes (`TypeError: data.map is not a function`).
+- **Implementation & Fix**:
+  - Refactored [`frontend/components/charts/HeatmapCorrelation.tsx`](file:///d:/Foresight/frontend/components/charts/HeatmapCorrelation.tsx) to strictly validate input arrays and filter for well-formed `{ x: string, y: string, value: number }` points.
+  - With empty or malformed data, the component now always renders the standardized graceful empty state `<div data-testid="chart-heatmap_correlation">No data available</div>`, never crashing or rendering a blank canvas.
+  - Added `data-testid="chart-heatmap_correlation"` on root containers.
+  - Corrected [`frontend/__tests__/agent3.test.tsx`](file:///d:/Foresight/frontend/__tests__/agent3.test.tsx):
+    - Updated empty data assertion to expect the standardized `"No data available"`.
+    - Added a malformed data test verifying graceful empty-state handling.
+    - Updated the variable-capping test to supply actual data (`data = [{ x: vars[0], y: vars[1], value: 0.5 }]`), ensuring it passes for the right reason (testing variable capping when data is present).
+
+### 2. Part B: Backend Endpoint Payload Audit (Read-Only)
+A systematic read-only audit of the 10 chart tokens against the backend responses for `forecast` ([`backend/src/analytics/forecast_engine.py`](file:///d:/Foresight/backend/src/analytics/forecast_engine.py)), `hypotheses` ([`backend/src/analytics/hypothesis_engine.py`](file:///d:/Foresight/backend/src/analytics/hypothesis_engine.py)), and `segmentation` (Engine B / `frontend/types/api.ts`).
+
+| Token | Required Fields | Present in Which Endpoint? | Gap (Y/N) | Details & Proposed Resolution |
+| :--- | :--- | :--- | :---: | :--- |
+| `line_chart` | Time-series `dates`, `actuals`, `forecasts` (point values) | `POST /api/v1/forecast` (`series.dates`, `series.actuals`, `forecast.dates`, `forecast.values`) | **N** | Fully supported in `forecast`. In `hypotheses`/`segmentation`: N/A (not picked). |
+| `forecast_band_chart` | `dates`, `actuals`, `forecasts`, CI bounds `lower`, `upper` | `POST /api/v1/forecast` (`forecast.lower`, `forecast.upper`, `forecast.values`, `series.dates`, `series.actuals`) | **N** | Fully supported in `forecast`. Confidence bounds calculated via holdout RMSE. |
+| `bar_comparison` | Category groups and aggregates: `group_stats` with `group`, `mean`, optional `std` error bars | `POST /api/v1/hypotheses` (`tests[i].group_stats` with `group`, `mean`, `std`, `n`) | **N** | Fully supported in `hypotheses`. Welch's t-test and ANOVA return complete group stats. |
+| `bar_line_combo` | Dual metrics: `dates`/`name`, `barValue`, `lineValue` | None | **Y** | Recommended in `hypotheses` by `heuristic_pick`, but `hypotheses` is a single-metric group comparison without dual metrics or time-series dates.<br>**Proposal**: **(b)** Remove `bar_line_combo` from `heuristic_pick("hypotheses")`, or optionally assign to `forecast` where actuals + forecasts form a natural bar + line combo. |
+| `box_plot` | Five-number summary: `category`, `min`, `q1`, `median`, `q3`, `max`, optional `outliers` | None | **Y** | Recommended in `hypotheses` by `heuristic_pick`, but `run_hypotheses()` only outputs `mean` and `std` in `group_stats`, omitting quartiles and min/max.<br>**Proposal**: **(a)** Add `min`, `q1`, `median`, `q3`, `max` to `group_stats` in `run_hypotheses()` via `np.percentile(a, [0, 25, 50, 75, 100])` (<1ms compute). |
+| `scatter_cluster` | 2D projection coordinates: `points: Array<{ x, y, clusterId }>`, `outlierMask` | Planned `SegmentationResponse` (spec Engine B) | **Y** | Endpoint `POST /api/v1/segmentation` is not yet mounted in `analytics_router.py`.<br>**Proposal**: **(a)** Mount the `POST /api/v1/segmentation` endpoint in `analytics_router.py` integrating the serialized Engine B models (`kmeans_k4.joblib`, `pca_2d.joblib`, `isolation_forest.joblib`). |
+| `heatmap_correlation` | Pairwise correlation matrix: `Array<{ x, y, value }>` | None | **Y** | Recommended in `segmentation` by `heuristic_pick`, but neither `segmentation` nor `hypotheses` computes a correlation matrix.<br>**Proposal**: **(a)** Add a `correlation_matrix` field to dataset summary/preprocessing response, or **(b)** Remove from `heuristic_pick("segmentation")` until an EDA profiling endpoint is introduced. |
+| `outlier_table` | Tabular outlier records: `Array<{ id, [col: string]: value }>` | None | **Y** | Recommended in `segmentation` by `heuristic_pick`, but `SegmentationResponse` only provides `outlierMask: boolean[]`, omitting the underlying record fields.<br>**Proposal**: **(a)** Add `outlier_records: list[dict]` to `SegmentationResponse` returning top N flagged rows (capped at 50-100 to preserve ephemeral RAM). |
+| `histogram_distribution` | Binned distribution: `bins`, `frequencies` (or raw numeric samples) | None (raw `series.actuals` exists in `forecast`) | **Y** | Not currently recommended by `heuristic_pick`. Precomputed bins and frequencies are not returned by any endpoint.<br>**Proposal**: **(a)** Add precomputed `bins` and `frequencies` (via `np.histogram`) to `forecast` and `hypotheses` profiling, and wire into `heuristic_pick`. |
+| `kpi_card` | Headline metric `value: string \| number`, title `title: string` | All endpoints (`forecast`, `hypotheses`, `segmentation`) | **N** | Fully supported across all endpoints for status, error messages, and single headline numbers. |
+
+### 3. Part C: Universal Empty-State Standardization across All 10 Chart Components
+- **Standardized Invariant**: Every chart component must render a uniform graceful empty state (`"No data available"`) when provided missing (`undefined`, `null`), empty (`[]`, `{}`), or malformed props, and must never throw runtime exceptions or render blank SVGs/canvases.
+- **Component Implementations**:
+  - [`frontend/components/charts/LineChart.tsx`](file:///d:/Foresight/frontend/components/charts/LineChart.tsx): Hardened `dates` array check; returns `<div data-testid="chart-line_chart">No data available</div>`.
+  - [`frontend/components/charts/ForecastBandChart.tsx`](file:///d:/Foresight/frontend/components/charts/ForecastBandChart.tsx): Hardened `dates` array check; returns `<div data-testid="chart-forecast_band_chart">No data available</div>`.
+  - [`frontend/components/charts/BarComparison.tsx`](file:///d:/Foresight/frontend/components/charts/BarComparison.tsx): Returns `<div data-testid="chart-bar_comparison">No data available</div>`.
+  - [`frontend/components/charts/BarLineCombo.tsx`](file:///d:/Foresight/frontend/components/charts/BarLineCombo.tsx): Returns `<div data-testid="chart-bar_line_combo">No data available</div>`.
+  - [`frontend/components/charts/HistogramDistribution.tsx`](file:///d:/Foresight/frontend/components/charts/HistogramDistribution.tsx): Returns `<div data-testid="chart-histogram_distribution">No data available</div>`.
+  - [`frontend/components/charts/HeatmapCorrelation.tsx`](file:///d:/Foresight/frontend/components/charts/HeatmapCorrelation.tsx): Rigorous point validation; returns `<div data-testid="chart-heatmap_correlation">No data available</div>`.
+  - [`frontend/components/charts/BoxPlot.tsx`](file:///d:/Foresight/frontend/components/charts/BoxPlot.tsx): Validates array input; returns `<div data-testid="chart-box_plot">No data available</div>`.
+  - [`frontend/components/charts/OutlierTable.tsx`](file:///d:/Foresight/frontend/components/charts/OutlierTable.tsx): Validates array input; returns `<div data-testid="chart-outlier_table">No data available</div>`.
+  - [`frontend/components/charts/ScatterCluster.tsx`](file:///d:/Foresight/frontend/components/charts/ScatterCluster.tsx): Validates `points` array; returns `<div data-testid="chart-scatter_cluster">No data available</div>`.
+  - [`frontend/components/charts/KpiCard.tsx`](file:///d:/Foresight/frontend/components/charts/KpiCard.tsx): Displays headline title, `--`, and `"No data available"` with `data-testid="chart-kpi_card"`.
+
+### 4. Verification & Test Suite Summary
+- **Frontend Test Suite**:
+  - `npm test`: **3 test suites passed, 32 of 32 tests passing** (100% pass rate).
+    - `__tests__/WidgetFactory.test.tsx`: 11 passed (all 10 tokens + fallback).
+    - `__tests__/charts.test.tsx`: 10 passed (all Agent 2 components).
+    - `__tests__/agent3.test.tsx`: 11 passed (all Agent 3 components + Heatmap empty & capped data tests).
+  - `npm run typecheck`: **0 errors**, strict TypeScript typecheck clean.
+
+---
+
+### 5. Comprehensive 10-Component & WidgetFactory Test Expansion
+- **Scope & Governance**: Test files only (`frontend/__tests__/*`). Component behavior was preserved without code modifications.
+- **Suite Expansion Summary**:
+  - Valid rendering without throwing across all 10 chart components: `LineChart`, `ForecastBandChart`, `BarComparison`, `BarLineCombo`, `HistogramDistribution`, `KpiCard`, `OutlierTable`, `HeatmapCorrelation`, `ScatterCluster`, `BoxPlot`.
+  - Empty-state rendering (`"No data available"`, `--`) under `undefined`, empty array `[]`, empty object `{}`, and degenerate data shapes across all components.
+  - `WidgetFactory` test suite:
+    - Verified all 10 tokens (`line_chart`, `bar_comparison`, `scatter_cluster`, `kpi_card`, `forecast_band_chart`, `bar_line_combo`, `box_plot`, `heatmap_correlation`, `outlier_table`, `histogram_distribution`) resolve to their respective components.
+    - Verified unmapped/unknown tokens safely fall back to `KpiCard` displaying the unsupported token message.
+    - Verified rendering with valid sample data and empty/undefined data without throwing.
+  - Hard performance caps asserted:
+    - `HeatmapCorrelation`: asserted capping at 50x50 variables by default when supplied 60+ variables, verifying warning text.
+    - `OutlierTable`: asserted capping at 100 rows by default when supplied 150+ records, verifying exactly 100 `<tr>` rows rendered in `<tbody>` alongside warning text.
+- **Test Pass Counts**:
+  - Before: 32 tests passing across 3 suites.
+  - After: **76 tests passing across 3 suites** (100% green).
+- **Component Defect Audit (Exposed Bugs Documented)**:
+  1. `WidgetFactory.tsx`: Uses local stub `<div>` elements rather than importing and rendering the actual implementations from `components/charts/`.
+  2. `HeatmapCorrelation.tsx`: When `variables` prop is omitted, `derivedVars` derives variables only from `validData.map(d => d.x)` rather than both `x` and `y`, resulting in an incomplete 1x1 matrix for arbitrary pairwise inputs.
+  3. `BoxPlot.tsx`: Y-domain computation uses `Math.min(...data.map(...))` which evaluates to `NaN` if non-numeric or malformed values are present.
+  4. `BarComparison.tsx`: Passes absolute confidence bounds `[mean - std, mean + std]` into Recharts `ErrorBar`, which standard Recharts treats as a relative error offset unless configured with a custom shape.
+
+---
+
+## Phase 4: Hypotheses Box Plot & Payload Contract Alignment
+
+### 1. Statistical Hypothesis Engine Enhancements (`backend/src/analytics/hypothesis_engine.py`)
+- **Five-Number Distribution Summary**:
+  - Enhanced `run_hypotheses()` to compute full distribution percentiles for each category group using `np.percentile(a, [0, 25, 50, 75, 100])`.
+  - Added `min`, `q1`, `median`, `q3`, and `max` directly into each `group_stats` entry, rounded to 4 decimal places alongside `mean` and `std`.
+- **Top-12 Group Capping**:
+  - Implemented automatic category capping: `keep = counts[counts >= 5].head(12).index`.
+  - Subsets and evaluates groups strictly capped at 12 (top by sample size `n`), guaranteeing that large-cardinality columns do not blow up frontend visualization performance or produce illegible box plots.
+- **Contract & Type Updates**:
+  - Updated [`docs/ENDPOINT_CONTRACT_PHASE4.md`](file:///d:/Foresight/docs/ENDPOINT_CONTRACT_PHASE4.md) documenting `min`, `q1`, `median`, `q3`, `max`, and the 12-group cap.
+  - Updated [`frontend/types/api.ts`](file:///d:/Foresight/frontend/types/api.ts) with `GroupStatEntry` and `HypothesisTestItem` schemas.
+
+### 2. Heuristic Chart Picker Alignment (`backend/src/orchestrator/chart_picker.py`)
+- **Removed `bar_line_combo` from Hypotheses Heuristic**:
+  - Updated `heuristic_pick("hypotheses", ...)`: when tests exist, it now returns `["bar_comparison", "box_plot"]` (removing `bar_line_combo`).
+  - Preserved `bar_line_combo` in `chart_registry.py` `ALLOWED` list and retained its frontend component for valid dual-metric usages.
+
+### 3. Frontend BoxPlot Alignment (`frontend/components/charts/BoxPlot.tsx`)
+- **Consumption of New Distribution Metrics**:
+  - Updated `BoxPlot.tsx` to consume `min`, `q1`, `median`, `q3`, `max` from `group_stats`.
+  - Added flexible data unwrapping supporting:
+    - Direct API response objects (`HypothesisResponse` with `tests[0].group_stats`).
+    - Raw arrays of `group_stats` entries (mapping `item.group` to `category`).
+    - Standard `BoxPlotData[]` arrays with `category`.
+  - Added safe numeric filtering to prevent `NaN` values from corrupting Recharts Y-axis domain boundaries.
+
+### 4. Payload-Contract Test Suite & Verification (`backend/tests/test_payload_contract.py`)
+- **Automated Contract Integrity Suite**:
+  - Created [`backend/tests/test_payload_contract.py`](file:///d:/Foresight/backend/tests/test_payload_contract.py) verifying that for every implemented endpoint (`POST /api/v1/forecast`, `POST /api/v1/hypotheses`), every token returned by `heuristic_pick` has its required fields present in the response:
+    - `forecast` (`line_chart`, `forecast_band_chart`, `kpi_card`): verifies presence and mathematical consistency of `series.dates`, `series.actuals`, `forecast.dates`, `forecast.values`, `forecast.lower`, `forecast.upper` ($lower \le value \le upper$), and headline metrics.
+    - `hypotheses` (`bar_comparison`, `box_plot`): verifies presence of `group_stats` with `group`, `n`, `mean`, `std`, and verifies percentile monotonicity ($min \le q1 \le median \le q3 \le max$).
+    - 12-group cap validation: verifies datasets with 20+ categories are strictly capped at 12 top by `n`.
+    - Degraded states: verifies fallback to `kpi_card` under insufficient data with descriptive message.
+- **Updated Test Suites**:
+  - Updated [`backend/tests/test_challenger2_adversarial.py`](file:///d:/Foresight/backend/tests/test_challenger2_adversarial.py) line 308 to assert `["bar_comparison", "box_plot"]`.
+  - Updated [`backend/tests/test_phase3a.py`](file:///d:/Foresight/backend/tests/test_phase3a.py) fallback assertions.
+
+### 5. Final Verification & Pass Counts
+- **Backend Test Suite**:
+  - `pytest backend/tests/`: **277 passed**, 0 failures, 1 warning (Starlette deprecation) in 129.08s.
+  - Includes all 4 payload contract tests in `backend/tests/test_payload_contract.py`.
+- **Frontend Test Suite**:
+  - `npm test`: **76 passed**, 0 failures across 3 test suites (`agent3.test.tsx`, `charts.test.tsx`, `WidgetFactory.test.tsx`).
+  - `npm run typecheck`: **0 errors**, strict TypeScript validation clean.
+- **Model Artifact Size Audit**:
+  - `python backend/scripts/audit_artifact_size.py`: **2.53 MB** combined across 10 artifacts (5.1% of 50.0 MB ceiling, 47.47 MB headroom).
+- **Segmentation Endpoint**:
+  - Strictly untouched per specification.

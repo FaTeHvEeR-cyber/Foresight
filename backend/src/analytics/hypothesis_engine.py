@@ -60,7 +60,7 @@ def run_hypotheses(df: pd.DataFrame, target: str | None = None, group_cols: list
     for g in groups:
         sub = pd.DataFrame({"y": y_all, "g": df[g]}).dropna()
         counts = sub["g"].value_counts()
-        keep = counts[counts >= 5].index
+        keep = counts[counts >= 5].head(12).index
         sub = sub[sub["g"].isin(keep)]
         levels = sorted(sub["g"].unique().tolist(), key=lambda v: (str(type(v)), v))
         if len(levels) < 2:
@@ -70,8 +70,16 @@ def run_hypotheses(df: pd.DataFrame, target: str | None = None, group_cols: list
         if all(np.var(a) == 0 for a in arrays):
             skipped.append({"column": g, "reason": "no variance in the target within groups"})
             continue
-        gstats = [{"group": _label(lv), "n": int(len(a)), "mean": round(float(a.mean()), 4),
-                   "std": round(float(a.std(ddof=1)), 4)} for lv, a in zip(levels, arrays)]
+        gstats = []
+        for lv, a in zip(levels, arrays):
+            p0, p25, p50, p75, p100 = np.percentile(a, [0, 25, 50, 75, 100])
+            gstats.append({
+                "group": _label(lv), "n": int(len(a)), "mean": round(float(a.mean()), 4),
+                "std": round(float(a.std(ddof=1)), 4),
+                "min": round(float(p0), 4), "q1": round(float(p25), 4),
+                "median": round(float(p50), 4), "q3": round(float(p75), 4),
+                "max": round(float(p100), 4),
+            })
         skew = float(stats.skew(sub["y"].to_numpy()))
         # non-parametric cross-check on a capped, seeded sample
         samp = [a if len(a) <= _NP_SAMPLE else rng.choice(a, _NP_SAMPLE, replace=False) for a in arrays]

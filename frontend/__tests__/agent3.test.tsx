@@ -24,6 +24,13 @@ describe("Agent 3 Chart Components", () => {
     it("renders gracefully with empty data", () => {
       render(<KpiCard title="Test KPI" value={null as any} />);
       expect(screen.getByText("--")).toBeInTheDocument();
+      expect(screen.getByText("No data available")).toBeInTheDocument();
+    });
+
+    it("renders gracefully with undefined data and value", () => {
+      render(<KpiCard data={undefined} value={undefined} />);
+      expect(screen.getByText("--")).toBeInTheDocument();
+      expect(screen.getByText("No data available")).toBeInTheDocument();
     });
 
     it("renders correctly with data", () => {
@@ -36,33 +43,76 @@ describe("Agent 3 Chart Components", () => {
   describe("OutlierTable", () => {
     it("renders gracefully with empty data", () => {
       render(<OutlierTable data={[]} />);
-      expect(screen.getByText(/No outliers detected/i)).toBeInTheDocument();
+      expect(screen.getByText("No data available")).toBeInTheDocument();
+    });
+
+    it("renders gracefully with undefined data", () => {
+      render(<OutlierTable data={undefined} />);
+      expect(screen.getByText("No data available")).toBeInTheDocument();
+    });
+
+    it("renders correctly with data", () => {
+      const data = [{ id: 1, val: 42 }];
+      render(<OutlierTable data={data} />);
+      expect(screen.getByTestId("chart-outlier_table")).toBeInTheDocument();
+      expect(screen.getByText("42")).toBeInTheDocument();
     });
 
     it("renders correctly with data and caps rows", () => {
       const data = Array.from({ length: 150 }).map((_, i) => ({ id: i, val: i }));
-      render(<OutlierTable data={data} maxRows={100} />);
+      const { container } = render(<OutlierTable data={data} maxRows={100} />);
       expect(screen.getByText(/Showing first 100/i)).toBeInTheDocument();
+      expect(container.querySelectorAll("tbody tr")).toHaveLength(100);
+    });
+
+    it("caps outlier table to 100 rows by default without maxRows prop", () => {
+      const data = Array.from({ length: 150 }).map((_, i) => ({ id: `row-${i}`, val: i }));
+      const { container } = render(<OutlierTable data={data} />);
+      expect(screen.getByText(/Showing first 100 out of 150 outliers/i)).toBeInTheDocument();
+      expect(container.querySelectorAll("tbody tr")).toHaveLength(100);
     });
   });
 
   describe("HeatmapCorrelation", () => {
     it("renders gracefully with empty data", () => {
       render(<HeatmapCorrelation data={[]} />);
-      expect(screen.getByText(/No correlation data available/i)).toBeInTheDocument();
+      expect(screen.getByText("No data available")).toBeInTheDocument();
+    });
+
+    it("renders gracefully with undefined data", () => {
+      render(<HeatmapCorrelation data={undefined} />);
+      expect(screen.getByText("No data available")).toBeInTheDocument();
+    });
+
+    it("renders gracefully with malformed data", () => {
+      render(<HeatmapCorrelation data={[{}] as any} />);
+      expect(screen.getByText("No data available")).toBeInTheDocument();
     });
 
     it("renders correctly with data and caps variables", () => {
       const vars = Array.from({ length: 60 }).map((_, i) => `var${i}`);
-      render(<HeatmapCorrelation data={[]} variables={vars} maxVars={50} />);
+      const data = [{ x: vars[0], y: vars[1], value: 0.5 }];
+      render(<HeatmapCorrelation data={data} variables={vars} maxVars={50} />);
       expect(screen.getByText(/Showing correlation matrix capped/i)).toBeInTheDocument();
+    });
+
+    it("caps heatmap to 50x50 variables by default without maxVars prop", () => {
+      const vars = Array.from({ length: 60 }).map((_, i) => `var${i}`);
+      const data = [{ x: vars[0], y: vars[1], value: 0.5 }];
+      render(<HeatmapCorrelation data={data} variables={vars} />);
+      expect(screen.getByText(/Showing correlation matrix capped at 50x50 variables/i)).toBeInTheDocument();
     });
   });
 
   describe("ScatterCluster", () => {
     it("renders gracefully with empty data", () => {
       render(<ScatterCluster data={undefined} />);
-      expect(screen.getByText(/No segmentation data available/i)).toBeInTheDocument();
+      expect(screen.getByText("No data available")).toBeInTheDocument();
+    });
+
+    it("renders gracefully with empty points array", () => {
+      render(<ScatterCluster data={{ points: [] } as any} />);
+      expect(screen.getByText("No data available")).toBeInTheDocument();
     });
 
     it("renders correctly with data", () => {
@@ -80,7 +130,12 @@ describe("Agent 3 Chart Components", () => {
   describe("BoxPlot", () => {
     it("renders gracefully with empty data", () => {
       render(<BoxPlot data={[]} />);
-      expect(screen.getByText(/No box plot data available/i)).toBeInTheDocument();
+      expect(screen.getByText("No data available")).toBeInTheDocument();
+    });
+
+    it("renders gracefully with undefined data", () => {
+      render(<BoxPlot data={undefined} />);
+      expect(screen.getByText("No data available")).toBeInTheDocument();
     });
 
     it("renders correctly with data", () => {

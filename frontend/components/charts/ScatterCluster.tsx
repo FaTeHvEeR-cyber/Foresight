@@ -40,10 +40,13 @@ interface ScatterClusterProps {
 }
 
 export function ScatterCluster({ data, className, xAxisLabel = "X", yAxisLabel = "Y" }: ScatterClusterProps) {
-  if (!data || !data.points || data.points.length === 0) {
+  if (!data || !data.points || !Array.isArray(data.points) || data.points.length === 0) {
     return (
-      <div className={cn("flex h-64 items-center justify-center rounded-lg border bg-muted/10 text-muted-foreground", className)}>
-        No segmentation data available.
+      <div
+        data-testid="chart-scatter_cluster"
+        className={cn("flex h-64 items-center justify-center rounded-lg border bg-muted/10 text-muted-foreground", className)}
+      >
+        No data available
       </div>
     );
   }
@@ -59,7 +62,7 @@ export function ScatterCluster({ data, className, xAxisLabel = "X", yAxisLabel =
   }, [data]);
 
   return (
-    <div className={cn("h-[400px] w-full border rounded-lg p-4 bg-background", className)}>
+    <div data-testid="chart-scatter_cluster" className={cn("h-[400px] w-full border rounded-lg p-4 bg-background", className)}>
       <ResponsiveContainer width="100%" height="100%">
         <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
           <CartesianGrid strokeDasharray="3 3" opacity={0.2} />

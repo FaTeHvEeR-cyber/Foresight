@@ -12,6 +12,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
+import type { HypothesisResponse } from "@/types/api";
 
 function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
@@ -25,10 +26,11 @@ export interface BoxPlotData {
   q3: number;
   max: number;
   outliers?: number[];
+  group?: string;
 }
 
 interface BoxPlotProps {
-  data?: BoxPlotData[];
+  data?: BoxPlotData[] | HypothesisResponse | any;
   className?: string;
 }
 
@@ -73,22 +75,60 @@ const BoxPlotShape = (props: any) => {
 };
 
 export function BoxPlot({ data, className }: BoxPlotProps) {
-  if (!data || data.length === 0) {
+  let rawList: any[] = [];
+  if (data?.tests && Array.isArray(data.tests) && data.tests.length > 0 && Array.isArray(data.tests[0].group_stats)) {
+    rawList = data.tests[0].group_stats;
+  } else if (Array.isArray(data)) {
+    rawList = data;
+  }
+
+  // Filter and map to ensure valid BoxPlotData with category and numeric min/q1/median/q3/max
+  const chartData: BoxPlotData[] = rawList
+    .filter(
+      (d) =>
+        d &&
+        typeof d === "object" &&
+        (typeof d.category === "string" || typeof d.group === "string" || d.category || d.group) &&
+        typeof d.min === "number" &&
+        !isNaN(d.min) &&
+        typeof d.q1 === "number" &&
+        !isNaN(d.q1) &&
+        typeof d.median === "number" &&
+        !isNaN(d.median) &&
+        typeof d.q3 === "number" &&
+        !isNaN(d.q3) &&
+        typeof d.max === "number" &&
+        !isNaN(d.max)
+    )
+    .map((d, i) => ({
+      category: String(d.category ?? d.group ?? `Group ${i + 1}`),
+      min: d.min,
+      q1: d.q1,
+      median: d.median,
+      q3: d.q3,
+      max: d.max,
+      outliers: Array.isArray(d.outliers) ? d.outliers : undefined,
+    }));
+
+  if (chartData.length === 0) {
     return (
-      <div className={cn("flex h-64 items-center justify-center rounded-lg border bg-muted/10 text-muted-foreground", className)}>
-        No box plot data available.
+      <div
+        data-testid="chart-box_plot"
+        className={cn("flex h-64 items-center justify-center rounded-lg border bg-muted/10 text-muted-foreground", className)}
+      >
+        No data available
       </div>
     );
   }
 
   // Find overall min and max to set domain properly
-  const yDomainMin = Math.min(...data.map(d => Math.min(d.min, ...(d.outliers || []))));
-  const yDomainMax = Math.max(...data.map(d => Math.max(d.max, ...(d.outliers || []))));
+  const yDomainMin = Math.min(...chartData.map((d) => Math.min(d.min, ...(d.outliers || []))));
+  const yDomainMax = Math.max(...chartData.map((d) => Math.max(d.max, ...(d.outliers || []))));
 
   return (
-    <div className={cn("h-[400px] w-full border rounded-lg p-4 bg-background", className)}>
+    <div data-testid="chart-box_plot" className={cn("h-[400px] w-full border rounded-lg p-4 bg-background", className)}>
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+        <BarChart data={chartData} margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
           <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
           <XAxis dataKey="category" tick={{ fontSize: 12 }} />
           <YAxis type="number" domain={[yDomainMin, yDomainMax]} tick={{ fontSize: 12 }} />

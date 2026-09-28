@@ -19,10 +19,13 @@ interface OutlierTableProps {
 }
 
 export function OutlierTable({ data = [], columns = [], maxRows = 100, className }: OutlierTableProps) {
-  if (!data || data.length === 0) {
+  if (!data || !Array.isArray(data) || data.length === 0) {
     return (
-      <div className={cn("p-4 border rounded-lg text-center text-muted-foreground", className)}>
-        No outliers detected or data is empty.
+      <div
+        data-testid="chart-outlier_table"
+        className={cn("p-4 border rounded-lg text-center text-muted-foreground flex items-center justify-center min-h-[140px]", className)}
+      >
+        No data available
       </div>
     );
   }
@@ -35,7 +38,7 @@ export function OutlierTable({ data = [], columns = [], maxRows = 100, className
   const cols = columns.length > 0 ? columns : Object.keys(data[0] || {}).filter((k) => k !== "id");
 
   return (
-    <div className={cn("border rounded-lg overflow-hidden flex flex-col", className)}>
+    <div data-testid="chart-outlier_table" className={cn("border rounded-lg overflow-hidden flex flex-col", className)}>
       <div className="overflow-x-auto max-h-[400px]">
         <table className="w-full text-sm text-left">
           <thead className="text-xs uppercase bg-muted/50 sticky top-0">

@@ -55,12 +55,52 @@ export interface ForecastResponse {
   modelUsed: "ridge" | "xgboost" | "mlp";
 }
 
+export interface GroupStatEntry {
+  group: string;
+  n?: number;
+  mean: number;
+  std?: number;
+  min?: number;
+  q1?: number;
+  median?: number;
+  q3?: number;
+  max?: number;
+}
+
+export interface HypothesisTestItem {
+  test?: "welch_t" | "anova";
+  statistic?: number;
+  p_value?: number;
+  p_value_adjusted?: number;
+  significant?: boolean;
+  significant_unadjusted?: boolean;
+  df?: number | [number, number];
+  grouping_column?: string;
+  target?: string;
+  n_groups?: number;
+  group_stats?: GroupStatEntry[];
+  target_skew?: number;
+  skew_warning?: boolean;
+  nonparametric_p?: number;
+  robust?: boolean;
+  baseline_group?: string;
+  comparison_group?: string;
+  mean_difference?: number;
+  lift_pct?: number | null;
+}
+
 export interface HypothesisResponse {
-  testType: "welch_t_test" | "anova";
-  pValue: number;
-  isSignificant: boolean;
-  alpha: number;
-  groups: string[];
+  testType?: "welch_t_test" | "anova";
+  pValue?: number;
+  isSignificant?: boolean;
+  alpha?: number;
+  groups?: string[];
+  status?: string;
+  target?: string;
+  message?: string | null;
+  tests?: HypothesisTestItem[];
+  skipped?: Array<{ column: string; reason: string }>;
+  notes?: string[];
 }
 
 export interface SegmentationResponse {
