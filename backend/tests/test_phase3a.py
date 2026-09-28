@@ -169,7 +169,7 @@ def _transport(status=200, chart="line_chart"):
         assert "column" not in json.dumps(body["contents"]).lower()       # no column names leave the box
         if status != 200:
             return httpx.Response(status, json={"error": "x"})
-        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": json.dumps({"chart": chart, "reason": "ok"})}]}}]})
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": json.dumps({"charts": [chart], "reason": "ok"})}]}}]})
     return httpx.MockTransport(handler)
 
 

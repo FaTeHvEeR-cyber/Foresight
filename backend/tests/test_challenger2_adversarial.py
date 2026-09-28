@@ -299,23 +299,23 @@ class TestChartPickerAdversarial:
     def test_heuristic_pick_coverage_all_scenarios(self):
         """Verify heuristic_pick behavior across all result kinds and edge conditions."""
         # Forecast ok -> line_chart
-        assert heuristic_pick("forecast", {"status": "ok"})[0] == "line_chart"
+        assert heuristic_pick("forecast", {"status": "ok"})[0] == ["line_chart", "forecast_band_chart", "kpi_card"]
         # Forecast insufficient_data -> kpi_card
-        assert heuristic_pick("forecast", {"status": "insufficient_data"})[0] == "kpi_card"
-        assert heuristic_pick("forecast", {"status": "error"})[0] == "kpi_card"
+        assert heuristic_pick("forecast", {"status": "insufficient_data"})[0] == ["kpi_card"]
+        assert heuristic_pick("forecast", {"status": "error"})[0] == ["kpi_card"]
 
         # Hypotheses with tests -> bar_comparison
-        assert heuristic_pick("hypotheses", {"status": "ok", "n_tests": 2})[0] == "bar_comparison"
+        assert heuristic_pick("hypotheses", {"status": "ok", "n_tests": 2})[0] == ["bar_comparison", "bar_line_combo", "box_plot"]
         # Hypotheses with 0 tests -> kpi_card
-        assert heuristic_pick("hypotheses", {"status": "ok", "n_tests": 0})[0] == "kpi_card"
+        assert heuristic_pick("hypotheses", {"status": "ok", "n_tests": 0})[0] == ["kpi_card"]
 
         # Segmentation ok -> scatter_cluster
-        assert heuristic_pick("segmentation", {"status": "ok"})[0] == "scatter_cluster"
+        assert heuristic_pick("segmentation", {"status": "ok"})[0] == ["scatter_cluster", "outlier_table", "heatmap_correlation"]
         # Segmentation not ok -> kpi_card
-        assert heuristic_pick("segmentation", {"status": "error"})[0] == "kpi_card"
+        assert heuristic_pick("segmentation", {"status": "error"})[0] == ["kpi_card"]
 
         # Unknown kind -> kpi_card
-        assert heuristic_pick("unknown_kind", {})[0] == "kpi_card"
+        assert heuristic_pick("unknown_kind", {})[0] == ["kpi_card"]
 
 
 # ==============================================================================
