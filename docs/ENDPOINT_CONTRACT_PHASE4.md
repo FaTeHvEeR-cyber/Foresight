@@ -133,7 +133,7 @@ When the uploaded table is valid tabular data but cannot generate a forecast, th
     "chart": "kpi_card",
     "reason": "Not enough data for a forecast chart; show the message as a card.",
     "source": "heuristic",
-    "allowed": ["line_chart", "bar_comparison", "scatter_cluster", "kpi_card"],
+    "allowed": ChartType[],
     "latency_ms": 0.1
   }
 }
@@ -149,7 +149,7 @@ When the uploaded table is valid tabular data but cannot generate a forecast, th
     "chart": "kpi_card",
     "reason": "Not enough data for a forecast chart; show the message as a card.",
     "source": "heuristic",
-    "allowed": ["line_chart", "bar_comparison", "scatter_cluster", "kpi_card"],
+    "allowed": ChartType[],
     "latency_ms": 0.1
   }
 }
@@ -235,14 +235,27 @@ export interface HypothesisTestResult {
 Every successful endpoint response includes a `recommended_visualization` block:
 
 ```typescript
+export type ChartType =
+  | "line_chart"
+  | "bar_comparison"
+  | "scatter_cluster"
+  | "kpi_card"
+  | "forecast_band_chart"
+  | "bar_line_combo"
+  | "box_plot"
+  | "heatmap_correlation"
+  | "outlier_table"
+  | "histogram_distribution";
+
 export interface RecommendedVisualization {
-  chart: "line_chart" | "bar_comparison" | "scatter_cluster" | "kpi_card";
-  reason: string;               // Concise rationale for this chart choice
-  source: "llm" | "heuristic";  // Origin of recommendation
-  allowed: string[];            // ["line_chart", "bar_comparison", "scatter_cluster", "kpi_card"]
-  model?: string;               // "gemini-2.5-flash" (present when source === "llm")
-  fallback_reason?: string;     // e.g. "llm_disabled", "no_api_key", "llm_http_429", "llm_error_ReadTimeout"
-  latency_ms: number;           // Orchestration latency in ms
+  charts: ChartType[];
+  chart: ChartType;
+  reason: string;
+  source: "llm" | "heuristic";
+  allowed: ChartType[];
+  model?: string;
+  fallback_reason?: string;
+  latency_ms: number;
 }
 ```
 
