@@ -425,7 +425,7 @@ All 12 architectural, performance, and governance criteria have been verified ac
 | **8** | **Max Upload Guardrail** | Hard limit uploads at 50.0 MB (`52,428,800` bytes) with HTTP 413 | 4-tier gatekeeper rejects oversized payloads; tested with 55 MB upload | **PASSED** |
 | **9** | **Formula Injection** | Neutralize spreadsheet command prefixes (`=`, `@`, `+`, `-`) | `sanitize_tabular_cells` strips/quotes formula triggers in text cells (CWE-1236) | **PASSED** |
 | **10** | **Security Scope** | GLM 5.3 strictly scoped to Security Audit Gate | Zero occurrences in runtime code or pipelines; strictly audit-scoped | **PASSED** |
-| **11** | **Chart Orchestrator** | 4-choice enum schema (`line_chart`, `bar_comparison`, `scatter_cluster`, `kpi_card`) | Gemini 3.8 Flash with 0 raw data leak + deterministic fallback under 429/500/timeout | **PASSED** |
+| **11** | **Chart Orchestrator** | 10-choice enum schema (`line_chart`, `bar_comparison`, `scatter_cluster`, `kpi_card`, `forecast_band_chart`, `bar_line_combo`, `box_plot`, `heatmap_correlation`, `outlier_table`, `histogram_distribution`) | Gemini 3.8 Flash with 0 raw data leak + deterministic fallback under 429/500/timeout | **PASSED** |
 | **12** | **Phase 3B Boundary** | Phase 3B clustering/anomaly endpoints unstarted | Zero Phase 3B code contamination in Phase 3A production paths | **PASSED** |
 
 ### 3. Security Audit Logs Table: Ingress vs. Analytics Router
@@ -452,7 +452,7 @@ Phase 3A delivered a robust, zero-auth, stateless analytics platform exceeding a
 2. **Leakage-Safe Feature Engineering Pipeline**: Automated date format inference, cyclical calendar encodings, frequency resampling (`D`, `W`, `M`, `Q`), expanding out-of-fold target encoding, and automated leakage detection (stripping ID columns and additive component sums like `casual` + `registered`).
 3. **Dual-Model Fast-Fit Forecasting Engine**: Dynamic in-memory tournament between regularized Ridge and histogram XGBoost, producing multi-step forecasts with 95% confidence intervals and seasonal naive skill benchmarks.
 4. **Statistical Hypothesis Engine**: Welch's unequal variance t-test, One-Way ANOVA, Holm-Bonferroni family-wise error rate control, Cohen's d and $\eta^2$ effect sizes, and non-parametric skewness cross-checks (Mann-Whitney U and Kruskal-Wallis).
-5. **AI Chart Orchestrator**: Privacy-preserving visualization picker leveraging Gemini 3.8 Flash constrained to a 4-choice component enum with instant deterministic fallback.
+5. **AI Chart Orchestrator**: Privacy-preserving visualization picker leveraging Gemini 3.8 Flash constrained to a 10-choice component enum returning a ranked list (max 3) with instant deterministic fallback.
 6. **Robust REST Endpoints**: High-performance FastAPI endpoints (`POST /api/v1/forecast`, `POST /api/v1/hypotheses`) wrapped in 4-tier security gatekeeping and ephemeral memory lifecycles.
 
 #### Key Improvements Versus Original Plan:
