@@ -304,8 +304,8 @@ class TestChartPickerAdversarial:
         assert heuristic_pick("forecast", {"status": "insufficient_data"})[0] == ["kpi_card"]
         assert heuristic_pick("forecast", {"status": "error"})[0] == ["kpi_card"]
 
-        # Hypotheses with tests -> bar_comparison
-        assert heuristic_pick("hypotheses", {"status": "ok", "n_tests": 2})[0] == ["bar_comparison", "bar_line_combo", "box_plot"]
+        # Hypotheses with tests -> bar_comparison, box_plot
+        assert heuristic_pick("hypotheses", {"status": "ok", "n_tests": 2})[0] == ["bar_comparison", "box_plot"]
         # Hypotheses with 0 tests -> kpi_card
         assert heuristic_pick("hypotheses", {"status": "ok", "n_tests": 0})[0] == ["kpi_card"]
 

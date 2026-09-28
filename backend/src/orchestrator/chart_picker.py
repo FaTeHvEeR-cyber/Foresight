@@ -34,7 +34,7 @@ def heuristic_pick(kind: str, facts: dict) -> tuple[list[str], str]:
         return ["line_chart", "forecast_band_chart", "kpi_card"], "Time series with a forecast horizon."
     if kind == "hypotheses":
         if facts.get("n_tests", 0) > 0:
-            return ["bar_comparison", "bar_line_combo", "box_plot"], "Group means compared across categories."
+            return ["bar_comparison", "box_plot"], "Group means compared across categories."
         return ["kpi_card"], "No usable tests to chart."
     if kind == "segmentation":
         return (["scatter_cluster", "outlier_table", "heatmap_correlation"], "2D projection of clusters and outliers.") if facts.get("status") == "ok" \
@@ -74,10 +74,19 @@ async def pick_chart(kind: str, facts: dict, *, use_llm: bool = True, settings: 
                 text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
                 out = json.loads(text)
                 charts = out.get("charts", [])
-                if isinstance(charts, list) and len(charts) > 0 and all(c in ALLOWED for c in charts):
-                    charts = charts[:3]
-                    base.update(charts=charts, chart=charts[0], reason=str(out.get("reason", ""))[:160], source="llm",
-                                model=s.llm_model)
+                if isinstance(charts, list):
+                    # Dedupe and filter valid
+                    valid_charts = []
+                    for c in charts:
+                        if c in ALLOWED and c not in valid_charts:
+                            valid_charts.append(c)
+                    
+                    if len(valid_charts) > 0:
+                        valid_charts = valid_charts[:3]
+                        base.update(charts=valid_charts, chart=valid_charts[0], reason=str(out.get("reason", ""))[:160], source="llm",
+                                    model=s.llm_model)
+                    else:
+                        base["fallback_reason"] = "llm_invalid_choice"
                 else:
                     base["fallback_reason"] = "llm_invalid_choice"
         except (httpx.HTTPError, KeyError, IndexError, ValueError, TypeError) as e:
