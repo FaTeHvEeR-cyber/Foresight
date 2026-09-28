@@ -159,11 +159,13 @@ def test_root_endpoints_mounted_and_gatekept(bike_df, wholesale_df):
 
 # ------------------------------------------------------------------ chart picker
 def _s(key="k"):
-    return Settings(google_api_key=key, llm_model="gemini-3.8-flash")
+    return Settings(google_api_key=key, GOOGLE_API_KEY=key, LLM_API_KEY=key, GEMINI_API_KEY=key, llm_model="gemini-3.8-flash")
 
 
-def _transport(status=200, chart="line_chart"):
+def _transport(status=200, chart="line_chart", timeout=False):
     def handler(req: httpx.Request):
+        if timeout:
+            raise httpx.ConnectTimeout("timeout")
         assert req.headers["x-goog-api-key"] == "k" and "gemini-3.8-flash" in str(req.url)
         body = json.loads(req.content)
         assert "column" not in json.dumps(body["contents"]).lower()       # no column names leave the box
@@ -175,16 +177,27 @@ def _transport(status=200, chart="line_chart"):
 
 @pytest.mark.anyio
 async def test_llm_choice_used():
-    r = await pick_chart("forecast", {"status": "ok"}, settings=_s(), transport=_transport())
+    r = await pick_chart("forecast", {"status": "ok"}, settings=_s(), transport=_transport(chart="line_chart"))
     assert r["source"] == "llm" and r["chart"] == "line_chart"
+    assert "charts" in r
+    assert len(r["charts"]) <= 3
+    assert all(c in ALLOWED for c in r["charts"])
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("kw,reason", [(dict(status=429), "llm_http_429"), (dict(chart="pie_3d"), "llm_invalid_choice")])
+@pytest.mark.parametrize("kw,reason", [
+    (dict(status=429), "llm_http_429"), 
+    (dict(status=500), "llm_http_500"),
+    (dict(chart="pie_3d"), "llm_invalid_choice"),
+    (dict(timeout=True), "llm_error_ConnectTimeout")
+])
 async def test_llm_failures_fall_back(kw, reason):
     r = await pick_chart("hypotheses", {"status": "ok", "n_tests": 2}, settings=_s(), transport=_transport(**kw))
     assert r["source"] == "heuristic" and r["chart"] == "bar_comparison" and r["fallback_reason"] == reason
     assert r["chart"] in ALLOWED
+    assert "charts" in r
+    assert len(r["charts"]) <= 3
+    assert all(c in ALLOWED for c in r["charts"])
 
 
 @pytest.mark.anyio

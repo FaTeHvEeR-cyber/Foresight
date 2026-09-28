@@ -298,7 +298,7 @@ class TestVector3PromptInjectionAndDataIsolation:
             })
             return httpx.Response(
                 200,
-                json={"candidates": [{"content": {"parts": [{"text": json.dumps({"chart": "line_chart", "reason": "ok"})}]}}]},
+                json={"candidates": [{"content": {"parts": [{"text": json.dumps({"charts": ["line_chart"], "reason": "ok"})}]}}]},
             )
 
         mock_transport = httpx.MockTransport(mock_handler)
