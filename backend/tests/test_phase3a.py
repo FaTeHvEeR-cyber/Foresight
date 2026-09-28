@@ -183,6 +183,30 @@ async def test_llm_choice_used():
     assert len(r["charts"]) <= 3
     assert all(c in ALLOWED for c in r["charts"])
 
+@pytest.mark.anyio
+async def test_llm_partial_bad_output():
+    # LLM returns >3 items, duplicates, some invalid items
+    def mock_handler(req: httpx.Request):
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": json.dumps({
+            "charts": ["line_chart", "pie_3d", "line_chart", "bar_comparison", "scatter_cluster", "kpi_card"],
+            "reason": "ok"
+        })}]}}]})
+    r = await pick_chart("forecast", {"status": "ok"}, settings=_s(), transport=httpx.MockTransport(mock_handler))
+    assert r["source"] == "llm"
+    assert r["charts"] == ["line_chart", "bar_comparison", "scatter_cluster"]
+    assert r["chart"] == "line_chart"
+
+@pytest.mark.anyio
+async def test_llm_all_invalid_output_falls_back():
+    def mock_handler(req: httpx.Request):
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": json.dumps({
+            "charts": ["pie_3d", "unknown_chart"],
+            "reason": "ok"
+        })}]}}]})
+    r = await pick_chart("forecast", {"status": "ok"}, settings=_s(), transport=httpx.MockTransport(mock_handler))
+    assert r["source"] == "heuristic"
+    assert r["fallback_reason"] == "llm_invalid_choice"
+
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("kw,reason", [
