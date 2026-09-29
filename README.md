@@ -871,3 +871,9 @@ A systematic read-only audit of the 10 chart tokens against the backend response
     - Corrected form-data parameter typing for `"horizon"` in [`backend/tests/test_payload_contract.py`](file:///d:/Foresight/backend/tests/test_payload_contract.py).
     - Tuned candidate cluster evaluation with `algorithm="lloyd"` and `sample_size=min(600, n_samples)` achieving robust sub-130ms compute execution.
   - Verified all 20 Phase 3B and Payload Contract tests passing (100% green); model artifact footprint verified at 2.53 MB (5.1% of 50 MB budget).
+  - Completed Phase 3B follow-up gap resolution:
+    - Remediated all 8 static analysis diagnostics with clean markdown table and zero remaining IDE issues.
+    - Diagnosed PCA 2D explained variance divergence (40.4% -> 10.20%) on Credit Card Fraud as the mathematical consequence of standardizing 28 orthogonal pre-reduced components into an identity covariance matrix ($2/29 \approx 6.9\% + \text{cov}(\text{Amount}) = 10.20\%$).
+    - Benchmarked Isolation Forest latency across tree counts on 20k rows (300 trees = 1173.5ms vs 15–20 trees = 70–95ms), confirming 15–20 trees as the optimal live production configuration.
+    - Clarified 20k subsampled recall (95.8%, 23/24) vs full dataset (85.8%, 422/492) as a small-sample review budget artifact (41.7 vs 28.9 review slots per fraud).
+    - Reported Online Retail peak silhouette score ($K=4$, $0.3801 < 0.40$), confirming the $K=4$ fallback trigger, and justified $N=600$ subsampling (saving 28.6ms with zero cluster decision impact).
