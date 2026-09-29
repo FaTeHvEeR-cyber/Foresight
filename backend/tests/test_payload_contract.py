@@ -165,3 +165,91 @@ class TestPayloadContract:
         # Hypotheses zero tests
         hyp_tokens, _ = heuristic_pick("hypotheses", {"status": "insufficient_data", "n_tests": 0})
         assert hyp_tokens == ["kpi_card"]
+
+        # Segmentation degraded/error
+        seg_tokens, _ = heuristic_pick("segmentation", {"status": "insufficient_data"})
+        assert seg_tokens == ["kpi_card"]
+
+    def test_segmentation_payload_contract(self):
+        """Verify that POST /api/v1/segmentation returns all required fields for every token in heuristic_pick:
+        scatter_cluster, outlier_table, heatmap_correlation.
+        """
+        rng = np.random.default_rng(42)
+        n = 80
+        df = pd.DataFrame({
+            "feature_1": rng.normal(10, 2, n),
+            "feature_2": rng.normal(20, 5, n),
+            "feature_3": rng.exponential(1.5, n),
+            "feature_4": rng.uniform(0, 100, n),
+        })
+        csv_bytes = _to_csv(df)
+
+        res = client.post(
+            "/api/v1/segmentation",
+            files={"file": ("segmentation.csv", csv_bytes, "text/csv")},
+            data={"use_llm": "false"},
+        )
+        assert res.status_code == 200, f"Segmentation request failed: {res.text}"
+        payload = res.json()
+        assert payload["status"] == "ok"
+
+        # Check heuristic pick for segmentation
+        tokens, reason = heuristic_pick("segmentation", {"status": "ok"})
+        assert tokens == ["scatter_cluster", "outlier_table", "heatmap_correlation"]
+        assert payload["recommended_visualization"]["charts"] == tokens
+        assert payload["recommended_visualization"]["chart"] == "scatter_cluster"
+
+        # 1. scatter_cluster required fields: pca_x, pca_y, cluster_assignments, optimal_k, clustering_method
+        assert "pca_x" in payload and "pca_y" in payload
+        assert "cluster_assignments" in payload
+        assert len(payload["pca_x"]) == len(payload["pca_y"]) == len(payload["cluster_assignments"])
+        assert len(payload["pca_x"]) == n
+        assert all(isinstance(v, (int, float)) for v in payload["pca_x"])
+        assert all(isinstance(v, (int, float)) for v in payload["pca_y"])
+        assert all(isinstance(c, int) for c in payload["cluster_assignments"])
+        assert payload["optimal_k"] in (2, 3, 4, 5, 6)
+        assert payload["clustering_method"] in ("data_driven_silhouette", "fallback_default")
+
+        # Frontend ScatterCluster component compatibility checks
+        assert "points" in payload and len(payload["points"]) == n
+        assert all("x" in pt and "y" in pt and "clusterId" in pt for pt in payload["points"])
+        assert "outlier_mask" in payload and len(payload["outlier_mask"]) == n
+
+        # 2. outlier_table required fields: outlier_records with id, anomaly_score, and original fields
+        assert "outlier_records" in payload
+        outliers = payload["outlier_records"]
+        assert isinstance(outliers, list)
+        assert len(outliers) > 0
+        assert len(outliers) <= 100
+
+        # Monotonic descending anomaly scores
+        scores = [row["anomaly_score"] for row in outliers]
+        for i in range(len(scores) - 1):
+            assert scores[i] >= scores[i + 1], f"Outlier scores not sorted descending at index {i}: {scores}"
+
+        for row in outliers:
+            assert "id" in row, f"Outlier record missing 'id': {row}"
+            assert "anomaly_score" in row, f"Outlier record missing 'anomaly_score': {row}"
+            assert isinstance(row["anomaly_score"], (int, float))
+            # Must carry original features for OutlierTable rendering
+            assert "feature_1" in row
+            assert "feature_2" in row
+
+        # 3. heatmap_correlation required fields: correlation_matrix (+ correlation_matrix_truncated flag)
+        assert "correlation_matrix" in payload
+        corr = payload["correlation_matrix"]
+        assert "columns" in corr and len(corr["columns"]) == 4
+        assert "values" in corr and len(corr["values"]) == 4
+        assert "points" in corr and len(corr["points"]) == 16
+        for pt in corr["points"]:
+            assert "x" in pt and "y" in pt and "value" in pt
+            assert -1.0 <= pt["value"] <= 1.0
+        assert "correlation_matrix_truncated" in payload
+        assert payload["correlation_matrix_truncated"] is False
+
+        # 4. Row-cap and subsampling metadata flags
+        assert "subsampled" in payload
+        assert payload["subsampled"] is False
+        assert "original_row_count" in payload
+        assert payload["original_row_count"] == n
+

@@ -1,8 +1,8 @@
 # Foresight Phase 4 Frontend Integration Contract
 
-**Document Version**: 1.0.0  
+**Document Version**: 1.1.0  
 **Target Audience**: Phase 4 Frontend Developers & UI Engineers  
-**Backend Endpoints**: `POST /api/v1/forecast`, `POST /api/v1/hypotheses`  
+**Backend Endpoints**: `POST /api/v1/forecast`, `POST /api/v1/hypotheses`, `POST /api/v1/segmentation`  
 **Base URL**: `http://localhost:8000/api/v1`  
 **Authentication**: Zero-Auth / Stateless  
 **CORS Policy**: Configured for `http://localhost:3000` and `http://127.0.0.1:3000` with `allow_credentials=True`.
@@ -235,7 +235,167 @@ export interface HypothesisTestResult {
 
 ---
 
-## 4. Visualization Recommendation Contract
+## 4. Endpoint: `POST /api/v1/segmentation`
+
+Performs unsupervised customer/entity clustering, 2D dimensionality reduction, and anomaly detection on tabular uploads using per-request in-memory model fitting. Evaluates candidate cluster counts $K \in \{2, 3, 4, 5, 6\}$ via subsampled silhouette scoring (adopting peak $K^*$ if silhouette $\ge 0.40$, else defaulting to $K=4$), computes 2D PCA projections with outlier-preserving coordinate capping (10,000 points max), scores anomalies via Isolation Forest at a fixed 3% contamination rate (returning top 100 outlier records formatted for the frontend `OutlierTable`), and computes pre-scaling Pearson correlation matrices.
+
+### 4.1. Request Specification
+- **Content-Type**: `multipart/form-data`
+- **HTTP Method**: `POST`
+- **Path**: `/api/v1/segmentation`
+
+| Field Name | Type | Presence | Default | Description |
+| :--- | :--- | :---: | :---: | :--- |
+| `file` | `File` (binary) | **Required** | — | Raw tabular file (.csv, .tsv, .xlsx, .parquet). Max 50 MB. |
+| `random_state` | `integer` | Optional | `42` | Random seed for deterministic reproducibility across KMeans, PCA, and Isolation Forest. |
+| `use_llm` | `boolean` | Optional | `true` | When `true`, requests Gemini 3.8 Flash to recommend ranked visualizations. When `false`, uses deterministic heuristic rules. |
+
+### 4.2. Success Response Schema (`200 OK`)
+
+```typescript
+export interface SegmentationSuccessResponse {
+  status: "ok";
+  message: string;
+  optimal_k: number;                    // Selected cluster count (e.g. 4)
+  clusterCount: number;                 // Convenience alias for optimal_k
+  clustering_method: "data_driven_silhouette" | "fallback_default";
+  
+  // 2D Projection Coordinates (capped at 10,000 points, 100% outliers guaranteed preserved)
+  pca_x: number[];                      // X-axis 2D PCA projection coordinates
+  pca_y: number[];                      // Y-axis 2D PCA projection coordinates
+  cluster_assignments: number[];        // Cluster ID per point (0 to optimal_k - 1)
+  clusters: number[];                   // Convenience alias for cluster_assignments
+  points: Array<{
+    x: number;
+    y: number;
+    clusterId: number;
+  }>;
+  
+  // Outlier Review Queue (Top 100 rows by anomaly score)
+  outlier_records: Array<{
+    id: string | number;                // Inferred or explicit row identifier
+    anomaly_score: number;              // Higher = more anomalous (-score_samples)
+    cluster: number;                    // Assigned cluster index
+    [feature_name: string]: any;        // Original row attributes for OutlierTable
+  }>;
+  outlier_mask: boolean[];              // Boolean mask for returned scatter points (true = flagged anomaly)
+  outlierMask: boolean[];               // Convenience alias for outlier_mask
+  outlier_score_method: "isolation_forest";
+  outlierScoreMethod: "isolation_forest";
+  
+  // Pre-scaling Correlation Matrix
+  correlation_matrix: {
+    columns: string[];                  // Evaluated feature names (capped at 25)
+    values: number[][];                 // 2D symmetric Pearson correlation grid [-1.0, 1.0]
+    points: Array<{                     // Flat list for heatmaps: {x, y, value}
+      x: string;
+      y: string;
+      value: number;
+    }>;
+    truncated: boolean;                 // true if features exceeded 25 and were truncated by variance
+  };
+  correlation_matrix_truncated: boolean;
+  
+  // Dataset & Subsampling Metadata
+  subsampled: boolean;                  // true if raw rows exceeded 20,000 and were uniform-subsampled
+  original_row_count: number;           // Total valid rows in the uploaded table
+  features_used: string[];              // Names of numeric features utilized for clustering
+  n_outliers: number;                   // Total outliers flagged in the fitted sample
+  contamination: number;                // Fixed operational contamination rate (0.03)
+  silhouette_scores: Record<number, number>; // Subsampled silhouette scores per candidate K evaluated
+  skew_transformed_columns: string[];   // Columns where np.log1p was applied (skew > 1.5)
+  
+  timing_ms: {
+    prepare_features: number;           // Feature extraction, RFM aggregation, and skew transform (ms)
+    scaling: number;                    // StandardScaler fit and transform (ms)
+    kmeans_clustering: number;          // Candidate K silhouette search and model fit (ms)
+    pca_projection: number;             // 2D PCA fit and transform (ms)
+    isolation_forest: number;           // Isolation Forest fit and sample scoring (ms)
+    payload_formatting: number;         // Top-100 outlier sort and coordinate formatting (ms)
+    compute_total: number;              // Total algorithmic compute latency in ms (Budget: < 200ms)
+    budget: number;                     // 200.0 ms
+    within_budget: boolean;             // Whether compute_total <= budget
+  };
+  
+  recommended_visualization: RecommendedVisualization;
+}
+```
+
+### 4.3. Component Integration Contracts
+
+#### 4.3.1. `OutlierTable` (`frontend/components/charts/OutlierTable.tsx`)
+The `outlier_records` array matches the expected `OutlierTableProps` contract directly:
+```tsx
+import { OutlierTable } from "@/components/charts/OutlierTable";
+
+export function OutliersView({ response }: { response: SegmentationSuccessResponse }) {
+  return (
+    <OutlierTable
+      data={response.outlier_records}
+      maxRows={100}
+    />
+  );
+}
+```
+
+#### 4.3.2. `ScatterCluster` (`frontend/components/charts/ScatterCluster.tsx`)
+```tsx
+import { ScatterCluster } from "@/components/charts/ScatterCluster";
+
+export function ClusterScatterView({ response }: { response: SegmentationSuccessResponse }) {
+  return (
+    <ScatterCluster
+      data={{
+        x: response.pca_x,
+        y: response.pca_y,
+        clusters: response.cluster_assignments,
+        outlierMask: response.outlier_mask,
+        clusterCount: response.optimal_k,
+      }}
+    />
+  );
+}
+```
+
+### 4.4. Degraded / Non-Error Responses (`200 OK`)
+
+#### Scenario A: Insufficient Observations (`insufficient_data`)
+Returned when the uploaded table contains fewer than 4 valid rows:
+```json
+{
+  "status": "insufficient_data",
+  "message": "Dataset has only 2 rows; minimum required for clustering is 4.",
+  "recommended_visualization": {
+    "charts": ["kpi_card"],
+    "chart": "kpi_card",
+    "reason": "Not enough data for clustering or anomaly detection; show the message as a card.",
+    "source": "heuristic",
+    "allowed": ["kpi_card"],
+    "latency_ms": 0.1
+  }
+}
+```
+
+#### Scenario B: No Numeric Features (`no_numeric_features`)
+Returned when all columns are string, text, or non-numeric identifiers:
+```json
+{
+  "status": "no_numeric_features",
+  "message": "No numeric feature columns found in dataset.",
+  "recommended_visualization": {
+    "charts": ["kpi_card"],
+    "chart": "kpi_card",
+    "reason": "Clustering requires at least one numeric feature column.",
+    "source": "heuristic",
+    "allowed": ["kpi_card"],
+    "latency_ms": 0.1
+  }
+}
+```
+
+---
+
+## 5. Visualization Recommendation Contract
 
 Every successful endpoint response includes a `recommended_visualization` block:
 
@@ -264,18 +424,20 @@ export interface RecommendedVisualization {
 }
 ```
 
-### 4.1. Chart Component Mapping Guide for Frontend
+### 5.1. Chart Component Mapping Guide for Frontend
 
 | Recommended Enum | Target Component | Data Source in Response | Recommended Frontend Presentation |
 | :--- | :--- | :--- | :--- |
 | `line_chart` | Time Series & Forecast Explorer | `res.series` + `res.forecast` + `res.holdout` | Render historical actuals in solid blue, forecast values in dashed teal, and fill 95% confidence bounds (`lower` to `upper`) with translucent shading. Provide toggle for validation holdout predictions. |
 | `bar_comparison` | Group Lift & Hypothesis Bar | `res.tests[i].group_stats` | Horizontal or vertical grouped bar chart comparing group means with error bars ($\pm \text{std}/\sqrt{n}$). Badge with lift % and statistical significance badge ($p < 0.05$). |
-| `scatter_cluster` | 2D Cluster & Outlier Projection | (Engine B / Phase 3B) | 2D PCA projection scatter plot color-coded by cluster assignment. Red circular pulse markers for review queue anomalies. |
+| `scatter_cluster` | 2D Cluster & Outlier Projection | `res.points` / `res.pca_x`, `res.pca_y`, `res.cluster_assignments`, `res.outlier_mask` | 2D PCA projection scatter plot color-coded by cluster assignment. Red circular pulse markers for review queue anomalies. |
+| `outlier_table` | Outlier Review Queue Table | `res.outlier_records` | Paginated/scrollable table displaying the top 100 rows flagged by anomaly score, preserving original row columns and IDs. |
+| `heatmap_correlation` | Correlation Heatmap | `res.correlation_matrix` | Interactive heatmap grid displaying feature-to-feature Pearson correlations [-1.0, 1.0], noting variance truncation if applicable. |
 | `kpi_card` | Summary Headline Metric Card | `res.message` or headline KPI | Large headline metric card accompanied by status badge, explanatory description, and latency/timing badges. |
 
 ---
 
-## 5. HTTP Error Code Reference
+## 6. HTTP Error Code Reference
 
 The backend implements standard RFC 7807 problem details with consistent JSON error bodies:
 ```json
@@ -294,9 +456,9 @@ The backend implements standard RFC 7807 problem details with consistent JSON er
 
 ---
 
-## 6. Frontend Integration Examples (TypeScript / React)
+## 7. Frontend Integration Examples (TypeScript / React)
 
-### 6.1. Executing a Forecast Request
+### 7.1. Executing a Forecast Request
 ```typescript
 import { ForecastSuccessResponse } from "@/types/analytics";
 
@@ -328,11 +490,42 @@ export async function uploadAndForecast(
 }
 ```
 
-### 6.2. Rendering Dynamic Visualizations
+### 7.2. Executing a Segmentation & Outlier Request
+```typescript
+import { SegmentationSuccessResponse } from "@/types/analytics";
+
+export async function uploadAndSegment(
+  file: File,
+  randomState: number = 42
+): Promise<SegmentationSuccessResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("random_state", randomState.toString());
+  formData.append("use_llm", "true");
+
+  const response = await fetch("http://localhost:8000/api/v1/segmentation", {
+    method: "POST",
+    body: formData,
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ detail: "Network error" }));
+    throw new Error(errorData.detail || `Upload failed with status ${response.status}`);
+  }
+
+  return response.json();
+}
+```
+
+### 7.3. Rendering Dynamic Visualizations
 ```tsx
 import React from "react";
 import { LineChartForecast } from "@/components/charts/LineChartForecast";
 import { BarComparison } from "@/components/charts/BarComparison";
+import { ScatterCluster } from "@/components/charts/ScatterCluster";
+import { OutlierTable } from "@/components/charts/OutlierTable";
+import { HeatmapCorrelation } from "@/components/charts/HeatmapCorrelation";
 import { KpiCard } from "@/components/charts/KpiCard";
 
 export function AnalyticsResultView({ result }: { result: any }) {
@@ -343,6 +536,22 @@ export function AnalyticsResultView({ result }: { result: any }) {
       return <LineChartForecast data={result} />;
     case "bar_comparison":
       return <BarComparison tests={result.tests} />;
+    case "scatter_cluster":
+      return (
+        <ScatterCluster
+          data={{
+            x: result.pca_x,
+            y: result.pca_y,
+            clusters: result.cluster_assignments,
+            outlierMask: result.outlier_mask,
+            clusterCount: result.optimal_k,
+          }}
+        />
+      );
+    case "outlier_table":
+      return <OutlierTable data={result.outlier_records} maxRows={100} />;
+    case "heatmap_correlation":
+      return <HeatmapCorrelation data={result.correlation_matrix} />;
     case "kpi_card":
     default:
       return (

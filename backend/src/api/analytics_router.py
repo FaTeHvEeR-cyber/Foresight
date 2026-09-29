@@ -141,3 +141,25 @@ async def hypotheses(file: UploadFile = File(...), target: str | None = Form(Non
         }
         res["recommended_visualization"] = await pick_chart("hypotheses", facts, use_llm=use_llm)
         return res
+
+
+from src.api.segmentation import segmentation as segmentation_handler
+from src.schemas.segmentation import SegmentationResponse
+
+router.add_api_route(
+    "/segmentation",
+    segmentation_handler,
+    methods=["POST"],
+    response_model=SegmentationResponse,
+    tags=["analytics"],
+    summary="Unsupervised clustering, PCA 2D projection, and IsolationForest anomaly scoring",
+)
+root_router.add_api_route(
+    "/segmentation",
+    segmentation_handler,
+    methods=["POST"],
+    response_model=SegmentationResponse,
+    tags=["analytics"],
+    summary="Unsupervised clustering, PCA 2D projection, and IsolationForest anomaly scoring",
+)
+

@@ -90,10 +90,16 @@ from src.api.analytics_router import (
     router as analytics_router,
     root_router as root_analytics_router,
 )
+from src.api.segmentation import (
+    router as segmentation_router,
+    root_router as root_segmentation_router,
+)
 
 # 3. Include Routers
 app.include_router(analytics_router)
 app.include_router(root_analytics_router)
+app.include_router(segmentation_router)
+app.include_router(root_segmentation_router)
 
 
 @app.get("/health")

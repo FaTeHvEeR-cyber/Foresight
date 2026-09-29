@@ -37,7 +37,9 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(ingestion.router)
     from src.api.analytics_router import router as analytics_router
+    from src.api.segmentation import router as segmentation_router
     app.include_router(analytics_router)
+    app.include_router(segmentation_router)
 
     # Root welcome / ping
     @app.get("/", tags=["root"])
