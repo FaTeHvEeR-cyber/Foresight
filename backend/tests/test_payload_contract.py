@@ -53,7 +53,7 @@ class TestPayloadContract:
         res = client.post(
             "/api/v1/forecast",
             files={"file": ("forecast.csv", csv_bytes, "text/csv")},
-            data={"target": "sales", "date_col": "date", "horizon": 7, "use_llm": "false"},
+            data={"target": "sales", "date_col": "date", "horizon": "7", "use_llm": "false"},
         )
         assert res.status_code == 200, f"Forecast failed: {res.text}"
         payload = res.json()

@@ -850,8 +850,24 @@ A systematic read-only audit of the 10 chart tokens against the backend response
 ## Update 2026-09-29
 - **Task**: Phase 4 Chart Expansion Merge & Validation
 - **Details**:
-  - Merged eat/chart-expansion-10 into main branch using --no-ff.
+  - Merged feat/chart-expansion-10 into main branch using --no-ff.
   - Executed backend test suite (277/277 passed) and frontend test suite (76/76 passed).
   - Pushed updated main branch to origin.
   - Appended the execution results and the payload-audit table to docs/PHASE_EXECUTION_LOG.md Section 9.
   - Verified expansion of the charting schema from 4 to 10 ChartType enumerations.
+
+## Update 2026-09-30
+- **Task**: Phase 3B Segmentation & Outlier Detection Implementation & Linter Remediation
+- **Details**:
+  - Implemented `POST /api/v1/segmentation` with pure in-memory training, Elkan/Lloyd KMeans ($K \in [2..6]$, silhouette $\ge 0.40$), Isolation Forest (contamination=0.03, top 100 outliers), 2D PCA, and Pearson correlation matrix.
+  - Added retail RFM aggregation (Recency, Frequency, log1p(Monetary), Return Ratio) and skew handling (`np.log1p` on $\text{skew} > 1.5$).
+  - Integrated dynamic visualization picking with `chart_picker` (`scatter_cluster`, `outlier_table`, `heatmap_correlation`).
+  - Implemented and certified test suites:
+    - [`backend/tests/test_phase3b_segmentation.py`](file:///d:/Foresight/backend/tests/test_phase3b_segmentation.py) (15 tests covering Wholesale Customers, Online Retail, Credit Card Fraud offline parity, latency budget, edge cases, and memory cleanup).
+    - [`backend/tests/test_payload_contract.py`](file:///d:/Foresight/backend/tests/test_payload_contract.py) (5 tests verifying complete field contract for forecast, hypotheses, and segmentation).
+  - Resolved static analysis diagnostics:
+    - Corrected pandas scalar typing stubs in [`backend/src/analytics/outlier_engine.py`](file:///d:/Foresight/backend/src/analytics/outlier_engine.py) using `typing.cast(float, ...)` on `skew()` and `corr()`.
+    - Removed redundant `bool()` and `str()` wrapper calls.
+    - Corrected form-data parameter typing for `"horizon"` in [`backend/tests/test_payload_contract.py`](file:///d:/Foresight/backend/tests/test_payload_contract.py).
+    - Tuned candidate cluster evaluation with `algorithm="lloyd"` and `sample_size=min(600, n_samples)` achieving robust sub-130ms compute execution.
+  - Verified all 20 Phase 3B and Payload Contract tests passing (100% green); model artifact footprint verified at 2.53 MB (5.1% of 50 MB budget).

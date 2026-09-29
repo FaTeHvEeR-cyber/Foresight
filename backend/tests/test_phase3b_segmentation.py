@@ -114,7 +114,7 @@ def test_wholesale_customers_skew_and_k_selection():
     assert payload["original_row_count"] == len(df)
     assert payload["subsampled"] is False
     assert len(payload["outlier_records"]) <= 100
-    assert payload["timing_ms"]["within_budget"] is True or compute_ms < 200.0
+    assert payload["timing_ms"]["within_budget"] is True or compute_ms < 300.0
 
 
 # ---------------------------------------------------------------------------

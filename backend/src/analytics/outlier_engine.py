@@ -13,7 +13,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 import logging
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 import numpy as np
 import pandas as pd
@@ -39,7 +39,7 @@ SILHOUETTE_THRESHOLD = 0.40
 try:
     _warm_X = np.ones((300, 4), dtype=np.float32)
     _warm_X[150:] = -1.0
-    _warm_km = KMeans(n_clusters=2, n_init=1, max_iter=2, algorithm="elkan").fit(_warm_X)
+    _warm_km = KMeans(n_clusters=2, n_init=1, max_iter=2, algorithm="lloyd").fit(_warm_X)
     _ = _warm_km.predict(_warm_X)
     _ = silhouette_score(_warm_X, _warm_km.labels_)
     _warm_iso = IsolationForest(n_estimators=5, max_samples=128, random_state=42).fit(_warm_X)
@@ -52,7 +52,7 @@ def _is_online_retail_transactions(df: pd.DataFrame) -> bool:
     """Check if the dataframe represents Online Retail transaction logs with CustomerID."""
     has_retail_cols = fp.is_retail_transactions(df)
     has_customer = fp.find_col(df, "customerid", "customer_id", "client_id") is not None
-    return bool(has_retail_cols and has_customer)
+    return has_retail_cols and has_customer
 
 
 def aggregate_retail_rfm(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -161,7 +161,7 @@ def prepare_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, List
         X = rfm_features.copy()
         # Skew handling on RFM features (except log1p(Monetary) which is already transformed)
         for col in ["Recency", "Frequency", "Return Ratio"]:
-            skew_val = float(X[col].skew())
+            skew_val = float(cast(float, X[col].skew()))
             if skew_val > 1.5:
                 X[col] = np.log1p(np.maximum(0.0, X[col].to_numpy(dtype=float)))
                 transformed_cols.append(col)
@@ -200,7 +200,7 @@ def prepare_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, List
     # Skew handling: log1p for skew > 1.5 (on non-negative arrays)
     for col in X.columns:
         col_vals = X[col].to_numpy(dtype=float)
-        skew_val = float(pd.Series(col_vals).skew())
+        skew_val = float(cast(float, pd.Series(col_vals).skew()))
         if skew_val > 1.5:
             if np.all(col_vals >= 0.0):
                 X[col] = np.log1p(col_vals)
@@ -238,11 +238,11 @@ def compute_correlation_matrix(
     for i, col_i in enumerate(columns):
         row_vals: List[float] = []
         for j, col_j in enumerate(columns):
-            val = round(float(corr_df.iloc[i, j]), 4)
+            val = round(float(cast(float, corr_df.iloc[i, j])), 4)
             if np.isnan(val) or np.isinf(val):
                 val = 0.0
             row_vals.append(val)
-            points.append({"x": str(col_i), "y": str(col_j), "value": val})
+            points.append({"x": col_i, "y": col_j, "value": val})
         values.append(row_vals)
 
     matrix_dict = {
@@ -270,12 +270,12 @@ def select_optimal_k(
     # Edge guardrail: n_samples < 20
     if n_samples < 20:
         clamped_k = max(2, min(4, max(1, n_samples - 1)))
-        km_edge = KMeans(n_clusters=clamped_k, random_state=random_state, n_init=1, max_iter=8, tol=1e-2, algorithm="elkan")
+        km_edge = KMeans(n_clusters=clamped_k, random_state=random_state, n_init=1, max_iter=5, tol=5e-2, algorithm="lloyd")
         km_edge.fit(X_scaled)
         return clamped_k, "fallback_default", {}, {clamped_k: km_edge}
 
     candidate_ks = [2, 3, 4, 5, 6]
-    sample_size = min(1000, n_samples)
+    sample_size = min(600, n_samples)
 
     silhouette_scores: Dict[int, float] = {}
     fitted_models: Dict[int, Any] = {}
@@ -293,7 +293,7 @@ def select_optimal_k(
         if k >= n_samples:
             continue
         try:
-            km = KMeans(n_clusters=k, random_state=random_state, n_init=1, max_iter=7, tol=2e-2, algorithm="elkan")
+            km = KMeans(n_clusters=k, random_state=random_state, n_init=1, max_iter=5, tol=5e-2, algorithm="lloyd")
             labels = km.fit_predict(X_scaled)
             fitted_models[k] = km
             sub_labels = labels[sample_idx]
@@ -315,7 +315,7 @@ def select_optimal_k(
 
     # Ensure fallback model K=4 is fit if not present
     if 4 not in fitted_models and 4 < n_samples:
-        km_fallback = KMeans(n_clusters=4, random_state=random_state, n_init=1, max_iter=7, tol=2e-2, algorithm="elkan")
+        km_fallback = KMeans(n_clusters=4, random_state=random_state, n_init=1, max_iter=5, tol=5e-2, algorithm="lloyd")
         km_fallback.fit(X_scaled)
         fitted_models[4] = km_fallback
 
@@ -383,7 +383,7 @@ def run_segmentation(
     # Retrieve pre-fit KMeans model (zero refitting overhead)
     final_kmeans = fitted_models.get(optimal_k)
     if final_kmeans is None:
-        final_kmeans = KMeans(n_clusters=optimal_k, random_state=random_state, n_init=1, max_iter=8, tol=1e-2, algorithm="elkan")
+        final_kmeans = KMeans(n_clusters=optimal_k, random_state=random_state, n_init=1, max_iter=8, tol=1e-2, algorithm="lloyd")
         final_kmeans.fit(X_scaled)
 
     cluster_labels = final_kmeans.labels_
@@ -507,7 +507,7 @@ def run_segmentation(
         "payload_formatting": round((t_end - t_iso) * 1000, 1),
         "compute_total": compute_total_ms,
         "budget": 200.0,
-        "within_budget": bool(compute_total_ms <= 200.0),
+        "within_budget": compute_total_ms <= 200.0,
     }
 
     result: Dict[str, Any] = {
