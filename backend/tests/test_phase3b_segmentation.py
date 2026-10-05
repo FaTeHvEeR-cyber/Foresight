@@ -10,6 +10,7 @@ Validates:
 7. Scatter payload capping: strictly capped at 10,000 points while preserving 100% of flagged outliers.
 8. Latency budget: execution under 200ms for standard tables (1k-20k rows).
 9. Memory cleanup: explicit dereferencing and gc.collect() verified.
+10. Synthetic Blobs: validates data_driven_silhouette selection branch with well-separated clusters.
 """
 from __future__ import annotations
 
@@ -23,6 +24,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
+from sklearn.datasets import make_blobs
 from sklearn.metrics import auc, precision_recall_curve, recall_score, roc_auc_score
 
 from app.main import app
@@ -422,3 +424,45 @@ def test_chart_picker_dynamic_recommendation():
     assert rec["charts"] == ["scatter_cluster", "outlier_table", "heatmap_correlation"]
     assert rec["chart"] == "scatter_cluster"
     assert rec["source"] == "heuristic"
+
+
+# ---------------------------------------------------------------------------
+# 10. Data-Driven Silhouette Branch Exercise (Synthetic Blobs)
+# ---------------------------------------------------------------------------
+
+
+def test_synthetic_blobs_data_driven_silhouette_branch():
+    """Build a synthetic, well-separated blob dataset (3 clusters, clear gaps)
+
+    and assert clustering_method == 'data_driven_silhouette' with the expected optimal_k (3).
+    """
+    X, _ = make_blobs(
+        n_samples=600,
+        n_features=4,
+        centers=3,
+        cluster_std=0.5,
+        center_box=(-20.0, 20.0),
+        random_state=42,
+    )
+    df = pd.DataFrame(X, columns=[f"feat_{i}" for i in range(4)])
+
+    # Direct engine execution
+    res = run_segmentation(df, random_state=42)
+    assert res["status"] == "ok"
+    assert res["clustering_method"] == "data_driven_silhouette"
+    assert res["optimal_k"] == 3
+    assert res["silhouette_scores"][3] >= 0.40
+
+    # API endpoint execution
+    csv_bytes = _to_csv_bytes(df)
+    r = client.post(
+        "/api/v1/segmentation",
+        files={"file": ("blobs.csv", csv_bytes, "text/csv")},
+        data={"use_llm": "false"},
+    )
+    assert r.status_code == 200
+    payload = r.json()
+    assert payload["status"] == "ok"
+    assert payload["clustering_method"] == "data_driven_silhouette"
+    assert payload["optimal_k"] == 3
+

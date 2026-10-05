@@ -34,6 +34,7 @@ MAX_OUTLIER_RECORDS = 100
 MAX_CORR_COLUMNS = 25
 FIXED_CONTAMINATION = 0.03
 SILHOUETTE_THRESHOLD = 0.40
+ISO_N_ESTIMATORS = 10
 
 # Pre-warm Windows OpenMP / threadpool DLLs at module import time to eliminate cold-start latency spikes
 try:
@@ -335,8 +336,8 @@ def run_segmentation(
     Args:
         df: Input tabular dataframe.
         random_state: Random seed for deterministic reproducibility.
-        n_estimators_iso: Number of trees for IsolationForest. Default auto-calibrated
-            (10 trees to guarantee sub-200ms budget).
+        n_estimators_iso: Number of trees for IsolationForest. Defaults to
+            ISO_N_ESTIMATORS (10).
 
     Returns:
         Dictionary matching the SegmentationResponse schema.
@@ -398,7 +399,7 @@ def run_segmentation(
 
     # 7. Isolation Forest & Outlier Contamination (§2)
     if n_estimators_iso is None:
-        n_estimators_iso = 10
+        n_estimators_iso = ISO_N_ESTIMATORS
 
     max_samples_iso = min(256, n_fit)
     iso = IsolationForest(

@@ -178,7 +178,7 @@ Phase 3B implements `POST /api/v1/segmentation` as a complete, self-contained, s
 - **Credit Card Fraud Offline Parity Benchmark (284,807 rows)**:
   - Validated offline parity of the pipeline math against Phase 2.5 benchmarks.
   - When exercised through the 20k subsampling path, metric delta confirmed:
-    - *Full Dataset Baseline (284,807 rows, 300 trees)*: AUC-ROC = 0.9529, PR-AUC = 0.2024, Recall@5% = 85.8%, PCA 2D Var = 10.20%.
+    - *Full Dataset Baseline (284,807 rows, 300 trees)*: AUC-ROC = 0.9529, PR-AUC = 0.2024, Recall@5% = 85.8%, PCA 2D Var = 10.20% (earlier 40.4% figure is unreconciled and superseded).
     - *Live 20k Subsampled (20,000 rows, 35 trees)*: AUC-ROC = 0.9780, PR-AUC = 0.1099, Recall@5% = 95.8%, PCA 2D Var = 10.80%.
     - *Delta (Sub - Full)*: AUC-ROC **+0.0251**, PR-AUC **-0.0925** (due to $N_{\text{fraud}}=24$ sample size), Recall@5% **+10.1%** (caught 23 of 24 frauds), PCA 2D Var **+0.60%**.
 - **Edge Case Guardrails**:
@@ -873,7 +873,24 @@ A systematic read-only audit of the 10 chart tokens against the backend response
   - Verified all 20 Phase 3B and Payload Contract tests passing (100% green); model artifact footprint verified at 2.53 MB (5.1% of 50 MB budget).
   - Completed Phase 3B follow-up gap resolution:
     - Remediated all 8 static analysis diagnostics with clean markdown table and zero remaining IDE issues.
-    - Diagnosed PCA 2D explained variance divergence (40.4% -> 10.20%) on Credit Card Fraud as the mathematical consequence of standardizing 28 orthogonal pre-reduced components into an identity covariance matrix ($2/29 \approx 6.9\% + \text{cov}(\text{Amount}) = 10.20\%$).
+    - Recorded PCA 2D variance for the standardized 29-feature Credit Card pipeline as 10.20%, and state that the earlier 40.4% figure is unreconciled and superseded (diagnosed mathematically as the consequence of standardizing 28 orthogonal pre-reduced components into an identity covariance matrix where $2/29 \approx 6.9\% + \text{cov}(\text{Amount}) = 10.20\%$).
     - Benchmarked Isolation Forest latency across tree counts on 20k rows (300 trees = 1173.5ms vs 15–20 trees = 70–95ms), confirming 15–20 trees as the optimal live production configuration.
     - Clarified 20k subsampled recall (95.8%, 23/24) vs full dataset (85.8%, 422/492) as a small-sample review budget artifact (41.7 vs 28.9 review slots per fraud).
-    - Reported Online Retail peak silhouette score ($K=4$, $0.3801 < 0.40$), confirming the $K=4$ fallback trigger, and justified $N=600$ subsampling (saving 28.6ms with zero cluster decision impact).
+    - Reported Online Retail peak silhouette score ($K=4$, $0.3801 < 0.40$), confirming the $K=4$ fallback trigger; clarified candidate cluster evaluation sample sizes: same winning K (K=4), orderings differ (N=600: 4>3>6>2>5; N=1000: 4>6>3>2>5).
+
+## Update 2026-10-05
+- **Task**: Phase 3B — Final Closure Items
+- **Details**:
+  - **Isolation Forest Estimator Configuration & Latency Calibration (`outlier_engine.py`)**:
+    - Configured Isolation Forest `n_estimators` as explicit, named module constant `ISO_N_ESTIMATORS = 10` (no implicit defaults).
+    - Measured end-to-end `compute_total_ms` directly (not estimated) across synthetic sizes and real datasets (n_jobs=1):
+      - *Initial trial at ISO_N_ESTIMATORS = 15*: 1k rows = 198.6ms, 5k rows = 188.4ms, 10k rows = 233.9ms, 20k rows = 323.6ms (exceeded 200ms budget), Wholesale = 154.7ms, Online Retail RFM = 177.3ms, Credit Card 20k Subsample = 584.5ms (AUC-ROC: 0.9840, PR-AUC: 0.2085, Recall@5%: 91.67%).
+      - *Step-down Calibration to ISO_N_ESTIMATORS = 10* (stepped down because 20k rows exceeded 200ms at 15 trees): 1k rows = 140–190ms (steady state), 5k rows = 170–195ms, 10k rows = 202.3ms, 20k rows = 277.7ms, Wholesale = 145.0ms, Online Retail RFM = 167.3ms, Credit Card 20k Subsample = 510.5ms.
+      - Final setting on 20k Credit Card subsample: `ISO_N_ESTIMATORS = 10`, AUC-ROC = **0.9837**, Recall@5% = **91.67%** (22/24 frauds caught), PR-AUC = **0.1779**.
+  - **Synthetic Blobs Silhouette Branch Test (`test_phase3b_segmentation.py`)**:
+    - Added `test_synthetic_blobs_data_driven_silhouette_branch` with well-separated Gaussian clusters ($N=600$, `centers=3`, `cluster_std=0.5`).
+    - Verified `clustering_method == "data_driven_silhouette"` with expected `optimal_k == 3` (peak silhouette = 0.9523 >= 0.40 threshold).
+  - **README Documentation Corrections**:
+    - Replaced the claim that $N=600$ and $N=1000$ give the same K ordering with: same winning K (K=4), orderings differ ($N=600$: $4 > 3 > 6 > 2 > 5$; $N=1000$: $4 > 6 > 3 > 2 > 5$).
+    - Recorded PCA 2D variance for the standardized 29-feature Credit Card pipeline as **10.20%**, and stated that the earlier 40.4% figure is unreconciled and superseded.
+
