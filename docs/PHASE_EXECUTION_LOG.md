@@ -8,14 +8,13 @@
 ---
 
 ## 1. Phase Execution Log & Milestone Status
-
 | Phase | Description | Completion Status | Test Suite & Artifacts | Exit Gate Verdict |
-| :--- | :--- | :---: | :--- | :---: |
+| :--- | :--- | :---: | :--- | :--- |
 | **Phase 1** | Ingestion, Validation & Sanitization (MIME sniffing, magic bytes, formula injection, size guard) | **100%** | 80 tests passing | **PASSED & CERTIFIED** |
 | **Phase 2** | Offline Baseline Modeling & Pipelines (Engine A Ridge/XGBoost/MLP, Engine B KMeans/IForest) | **100%** | 100 tests passing, 10 `.joblib` artifacts (2.53 MB) | **PASSED & CERTIFIED** |
 | **Phase 3A** | Stateless In-Memory Analytics API (`/forecast`, `/hypotheses`, dual regressor, chart picker) | **100%** | 89 tests passing (unit, root alias, real benchmarks, adversarial, security), 269 total | **PASSED & CLOSED** |
-| **Phase 3B** | Unsupervised Segmentation & Anomaly API (`/segmentation`, KMeans, PCA 2D, 5% IForest review queue) | **0%** | Briefed; awaiting kickoff & user configuration | **PENDING KICKOFF** |
-| **Phase 4** | Frontend User Interface & Interactive Dashboards (Next.js, Tailwind, Recharts, drag-and-drop) | **0%** | Endpoint contract published; blocked on Phase 3B | **BLOCKED ON 3B** |
+| **Phase 3B** | Unsupervised Segmentation & Anomaly API (`/segmentation`, KMeans, PCA 2D, 5% IForest review queue) | **100%** | 20 tests passing (15 segmentation + 5 payload contract), 294 total backend | **PASSED & CLOSED** |
+| **Phase 4** | Frontend User Interface & Interactive Dashboards (Next.js, 10-Chart Schema, Recharts, WidgetFactory) | **85%** | 76 frontend tests passing, 10 chart components & WidgetFactory verified; live dashboard wiring underway | **ACTIVE / EXPANSION COMPLETE** |
 
 ---
 
