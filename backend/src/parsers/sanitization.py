@@ -226,7 +226,11 @@ def validate_file_size(file_bytes: Union[bytes, bytearray, memoryview, int]) -> 
             status_code=400,
         )
 
-    if isinstance(file_bytes, (int, float)):
+    if isinstance(file_bytes, bool):
+        raise TypeError("Expected bytes or int, got bool")
+    elif isinstance(file_bytes, int):
+        size_bytes = file_bytes
+    elif isinstance(file_bytes, float):
         size_bytes = int(file_bytes)
     elif isinstance(file_bytes, (bytes, bytearray, memoryview)):
         size_bytes = len(file_bytes)
@@ -416,12 +420,13 @@ def gatekeep_tabular_upload(
     Returns:
         str: Normalized lowercase file extension.
     """
-    if max_bytes is None:
-        max_bytes = getattr(settings, "max_upload_bytes", 50 * 1024 * 1024)
+    upload_limit: int = (
+        max_bytes if max_bytes is not None else int(getattr(settings, "max_upload_bytes", 50 * 1024 * 1024))
+    )
 
     # 1. Size guardrail: 50MB HTTP 413 (and 0-byte HTTP 422)
-    if len(content) > max_bytes:
-        max_mb = max_bytes // (1024 * 1024)
+    if len(content) > upload_limit:
+        max_mb = upload_limit // (1024 * 1024)
         file_mb = len(content) / (1024 * 1024)
         raise HTTPException(
             status_code=413,

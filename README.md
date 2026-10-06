@@ -922,5 +922,22 @@ A systematic read-only audit of the 10 chart tokens against the backend response
   - Authored comprehensive audit report [`backend/reports/phase3b_security_audit.md`](file:///d:/Foresight/backend/reports/phase3b_security_audit.md).
   - Test Suite Results: All 53 Phase 3B security tests passed; full backend suite passes at **347 / 347 tests** (100% green, 0 skips, 0 failures).
 
+## Update 2026-10-07 (Code Quality & Static Type Analysis)
+- **Task**: Resolving redundant `int()` cast diagnostic and strict type narrowing in `sanitization.py`.
+- **Details**:
+  - **Root Cause Analysis (`validate_file_size`)**:
+    - `file_bytes` is annotated as `Union[bytes, bytearray, memoryview, int]`.
+    - Pylance / Pyright type narrowing intersected the input with `(int, float)` to strictly `int`, causing `size_bytes = int(file_bytes)` to trigger the diagnostic: `Unnecessary int() call; argument is already of type int`.
+    - Furthermore, in Python `bool` subclasses `int` (`isinstance(True, int) is True`), allowing boolean values to silently masquerade as valid file sizes unless explicitly caught.
+  - **Remediation**:
+    - Dispatched `isinstance(file_bytes, bool)` explicitly to raise `TypeError` with message `"Expected bytes or int, got bool"`.
+    - Replaced redundant `int(file_bytes)` with direct assignment `size_bytes = file_bytes` under `elif isinstance(file_bytes, int):`.
+    - Retained safe runtime float conversion via `elif isinstance(file_bytes, float): size_bytes = int(file_bytes)`.
+    - Refactored `upload_limit` in `sanitize_and_validate_upload()` to guarantee non-None integer typing, resolving Pyright `reportOptionalOperand` diagnostics.
+  - **Verification**:
+    - Pyright analysis on [`backend/src/parsers/sanitization.py`](file:///d:/Foresight/backend/src/parsers/sanitization.py) returned **0 errors, 0 warnings**.
+    - Unit tests in [`backend/tests/test_sanitization.py`](file:///d:/Foresight/backend/tests/test_sanitization.py) expanded with boolean rejection and passed 100% (47/47 green).
+
+
 
 

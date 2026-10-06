@@ -124,6 +124,7 @@ def test_validate_mime_and_extension_malformed_inputs(filename, content_type):
 def test_validate_file_size_valid():
     """Accept sizes strictly below and exactly at the 25MB boundary."""
     assert validate_file_size(b"sample data content") is True
+    assert validate_file_size(1024) is True
 
     # Exactly at boundary
     exact_limit_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
@@ -154,9 +155,15 @@ def test_validate_file_size_empty():
 
 
 def test_validate_file_size_invalid_type():
-    """Raise TypeError on unsupported types."""
+    """Raise TypeError on unsupported types, including boolean and invalid containers."""
     with pytest.raises(TypeError):
         validate_file_size(["not", "bytes"])  # type: ignore
+
+    with pytest.raises(TypeError):
+        validate_file_size(True)  # type: ignore
+
+    with pytest.raises(TypeError):
+        validate_file_size(False)  # type: ignore
 
 
 # ============================================================================
