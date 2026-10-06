@@ -11,6 +11,7 @@ Provides:
 - MimeTypeError & FileSizeError: Specific, clear exceptions for error handling in main.py.
 """
 
+import os
 from typing import Any, Dict, Optional, Set, Union
 from fastapi import HTTPException
 import pandas as pd
@@ -117,7 +118,7 @@ EXTENSION_TO_ALLOWED_MIMES: Dict[str, Set[str]] = {
 }
 
 # Formula injection prefixes per spec §4.2 and OWASP CSV Injection guidelines
-FORMULA_PREFIXES = ("=", "@", "+", "-")
+FORMULA_PREFIXES = ("=", "@", "+", "-", "\t", "\r", "\n", "\uff1d", "\uff20", "\uff0b", "\uff0d")
 
 
 def validate_mime_and_extension(filename: str, content_type: str) -> bool:
@@ -290,9 +291,10 @@ def sanitize_tabular_cells(
     def _sanitize_val(val: Any) -> Any:
         if not isinstance(val, str) or not val:
             return val
-        if val[0] in FORMULA_PREFIXES:
+        stripped = val.lstrip()
+        if val[0] in FORMULA_PREFIXES or (stripped and stripped[0] in FORMULA_PREFIXES):
             if selected_method == "strip":
-                return val.lstrip("=@+-")
+                return stripped.lstrip("=@+-\t\r\n\uff1d\uff20\uff0b\uff0d")
             else:
                 return f"'{val}"
         return val
@@ -300,10 +302,21 @@ def sanitize_tabular_cells(
     sanitized_df = df.copy()
 
     # Neutralize dangerous formula prefixes in column headers
-    sanitized_df.columns = [
+    new_cols = [
         _sanitize_val(col) if isinstance(col, str) else col
         for col in sanitized_df.columns
     ]
+    seen_cols: Dict[str, int] = {}
+    deduped_cols = []
+    for c in new_cols:
+        col_str = str(c)
+        if col_str in seen_cols:
+            seen_cols[col_str] += 1
+            deduped_cols.append(f"{col_str}.{seen_cols[col_str]}")
+        else:
+            seen_cols[col_str] = 0
+            deduped_cols.append(c)
+    sanitized_df.columns = deduped_cols
 
     for col in sanitized_df.columns:
         series = sanitized_df[col]
@@ -422,10 +435,16 @@ def gatekeep_tabular_upload(
 
     # 2. Extension validation
     clean_filename = (filename or "").strip()
-    if not clean_filename or "." not in clean_filename:
+    if "\x00" in clean_filename or "%00" in clean_filename.lower():
         raise HTTPException(
             status_code=415,
-            detail=f"Unsupported file format: File '{clean_filename}' has no valid extension. Foresight requires a valid extension (disallowed).",
+            detail="Filename contains null byte characters (disallowed).",
+        )
+    if not clean_filename or "." not in clean_filename:
+        safe_name = os.path.basename(clean_filename.replace("\\", "/"))
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported file format: File '{safe_name}' has no valid extension. Foresight requires a valid extension (disallowed).",
         )
 
     ext = clean_filename.rsplit(".", 1)[-1].strip().lower()

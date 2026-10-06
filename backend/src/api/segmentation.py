@@ -42,11 +42,13 @@ def _load(raw: bytes, name: str):
     """Load tabular data behind gatekeeper validation and sanitize formula injection."""
     try:
         df = load_tabular(raw, name)
+        return sanitize_tabular_cells(df)
     except UnsupportedFormat as e:
         raise HTTPException(415, str(e)) from e
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(422, f"Could not read the file as a table: {type(e).__name__}") from e
-    return sanitize_tabular_cells(df)
 
 
 def _segmentation_job(raw: bytes, name: str) -> Tuple[Dict[str, Any], float]:
@@ -56,8 +58,12 @@ def _segmentation_job(raw: bytes, name: str) -> Tuple[Dict[str, Any], float]:
     t_load = time.perf_counter()
     try:
         res = run_segmentation(df)
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
+    except Exception as e:
+        raise HTTPException(500, f"Segmentation computation error: {type(e).__name__}") from e
     finally:
         del df
         gc.collect()

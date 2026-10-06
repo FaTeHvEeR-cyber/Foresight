@@ -904,4 +904,23 @@ A systematic read-only audit of the 10 chart tokens against the backend response
     - Model Artifact Footprint Audit: **2.53 MB** across 10 `.joblib` files (5.1% of 50.0 MB limit, leaving 47.47 MB headroom).
   - Synchronized documentation milestones across `README.md` and `docs/PHASE_EXECUTION_LOG.md` reflecting certified completion of Phase 3B (Stateless Segmentation & Anomaly Detection API) and Phase 4 Chart Expansion (10-Chart Token Schema & UI Component Foundations).
 
+## Update 2026-10-07
+- **Task**: Phase 3B Independent Security Audit (Anti-Gravity 5-Vector Audit Gate Verification)
+- **Details**:
+  - Conducted independent second-pass security audit of Phase 3B (`POST /api/v1/segmentation`) across all 5 Anti-Gravity security vectors.
+  - Implemented comprehensive adversarial test suite [`backend/tests/test_phase3b_security.py`](file:///d:/Foresight/backend/tests/test_phase3b_security.py) (53 empirical tests) covering:
+    - **Vector 1 (Ephemeral RAM & Zero Persistence)**: Verified zero file writes to disk (`open`, `NamedTemporaryFile`, `mkstemp`), clean OS temp/CWD, explicit dereferencing and `gc.collect()` in `finally` across 200/4xx/500 paths, and strict concurrency isolation across 20 simultaneous requests.
+    - **Vector 2 (Input Injection & CWE-1236 Neutralization)**: Validated formula neutralization across all hostile fixtures, formula cells in outlier records, formula headers across all echo surfaces (`features_used`, `correlation_matrix.columns`, `points`, `outlier_records`), and deep recursive inspection of all response strings.
+    - **Vector 3 (Prompt Injection & LLM Data Isolation)**: Verified zero transmission of column names or cell values to Gemini 3.8 Flash, prompt injection immunity with hostile headers, safe fallback under missing API key, timeout handling, and resilience against adversarial model responses (SQLi, XSS, RCE, unrecognized chart tokens).
+    - **Vector 4 (Denial of Service & Free-Tier Budget Protection)**: Enforced 50MB upload limits (50MB exact allowed, 50MB+1 rejected with HTTP 413), 0-byte rejection (HTTP 422), 5,000-column wide tables bounded, 25,000-row deep tables subsampled to 20,000 ceiling, high-row Parquet files, multi-sheet Excel files, and 1MB single-cell strings.
+    - **Vector 5 (Logic Flaws & Hostile Shapes)**: Verified binary magic byte checks (Windows PE, Linux ELF rejected with HTTP 415), corrupt spreadsheets, MIME/extension mismatches, all-null columns, single-column/single-row shapes, TSV/TXT formats, UTF-8 BOM parsing, ragged rows, path traversal, null bytes, and HTTP method/content-type surface.
+  - Identified and remediated 4 vulnerabilities missed by the first-pass draft:
+    - *Finding 1 (High)*: Header sanitization collision crash (`AttributeError: 'DataFrame' object has no attribute 'dtype'`) resolved via column header disambiguation in `sanitize_tabular_cells()`.
+    - *Finding 2 (Medium)*: Leading-whitespace formula injection bypass (` =cmd`, `\t=cmd`, `\r+123`) neutralized via `val.lstrip()` inspection in `_sanitize_val()`.
+    - *Finding 3 (Medium)*: Unhandled non-ValueError runtime exceptions in `_segmentation_job` resolved with controlled `HTTPException(500, ...)` error wrapping.
+    - *Finding 4 (Low)*: Filename path traversal disclosure and URL-encoded null bytes (`%00`) sanitized via `os.path.basename()` in `gatekeep_tabular_upload()`.
+  - Authored comprehensive audit report [`backend/reports/phase3b_security_audit.md`](file:///d:/Foresight/backend/reports/phase3b_security_audit.md).
+  - Test Suite Results: All 53 Phase 3B security tests passed; full backend suite passes at **347 / 347 tests** (100% green, 0 skips, 0 failures).
+
+
 
