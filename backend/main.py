@@ -11,6 +11,7 @@ Implements the POST /upload endpoint with:
 """
 
 import io
+import os
 from typing import Any, Dict, Optional, cast
 import uuid
 
@@ -129,6 +130,7 @@ from fastapi.responses import JSONResponse
 
 @app.post("/upload", response_model=UploadResponse)
 @app.post("/api/upload", response_model=UploadResponse)
+@app.post("/api/v1/upload", response_model=UploadResponse)
 async def upload(file: Optional[UploadFile] = File(None)):
     """Ingest, validate, profile, and preprocess uploaded dataset or document."""
     # 6. Wrap the whole handler body in the ephemeral_processing() context manager
@@ -137,6 +139,7 @@ async def upload(file: Optional[UploadFile] = File(None)):
             return JSONResponse(status_code=200, content={"message": "Upload stub"})
 
         filename = file.filename or ""
+        safe_filename = os.path.basename(filename.replace("\\", "/"))
 
         # 1. Read the uploaded file into bytes via io.BytesIO (no disk writes)
         raw_contents = await file.read()
@@ -173,7 +176,7 @@ async def upload(file: Optional[UploadFile] = File(None)):
             except Exception as exc:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Failed to parse tabular file '{filename}': {str(exc)}",
+                    detail=f"Failed to parse tabular file '{safe_filename}': {type(exc).__name__}",
                 )
 
             sanitized_df = sanitize_tabular_cells(raw_df)
@@ -226,7 +229,7 @@ async def upload(file: Optional[UploadFile] = File(None)):
             except Exception as exc:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Failed to parse document file '{filename}': {str(exc)}",
+                    detail=f"Failed to parse document file '{safe_filename}': {type(exc).__name__}",
                 )
 
             doc_text = doc_result.get("raw_text", "")
@@ -249,7 +252,7 @@ async def upload(file: Optional[UploadFile] = File(None)):
         # 7. Return an UploadResponse with the raw null profile populated — not imputed data
         return UploadResponse(
             fileId=file_id,
-            fileName=filename,
+            fileName=safe_filename,
             fileSizeBytes=len(file_bytes),
             detectedKind=detected_kind,
             detectedFormat=detected_format,

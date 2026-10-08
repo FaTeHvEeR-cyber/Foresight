@@ -44,11 +44,13 @@ def _load(raw: bytes, name: str):
     """Load tabular data behind gatekeeper validation and sanitize formula injection."""
     try:
         df = load_tabular(raw, name)
+        return sanitize_tabular_cells(df)
     except UnsupportedFormat as e:
         raise HTTPException(415, str(e)) from e
+    except HTTPException:
+        raise
     except Exception as e:  # unreadable table
         raise HTTPException(422, f"Could not read the file as a table: {type(e).__name__}") from e
-    return sanitize_tabular_cells(df)
 
 
 def _forecast_job(
@@ -61,14 +63,19 @@ def _forecast_job(
         prep = fp.prepare_series(df, target=target, date_col=date_col)
         t_prep = time.perf_counter()
         res = run_forecast(prep, horizon)
+    except HTTPException:
+        raise
     except fp.SeriesTooShort as e:
         return {"status": "insufficient_data", "message": str(e)}, (t0, t_load, time.perf_counter())
     except fp.NoDateColumn as e:
         return {"status": "no_date_column", "message": str(e)}, (t0, t_load, time.perf_counter())
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
+    except Exception as e:
+        raise HTTPException(500, f"Forecast computation error: {type(e).__name__}") from e
     finally:
         del df
+        gc.collect()
     res["timing_ms"]["load_parse"] = round((t_load - t0) * 1000, 1)
     res["timing_ms"]["prepare_series"] = round((t_prep - t_load) * 1000, 1)
     return res, (t0, t_load, t_prep)
@@ -110,10 +117,15 @@ def _hypo_job(raw: bytes, name: str, target: Optional[str], group_cols: Optional
     df = _load(raw, name)
     try:
         return run_hypotheses(df, target=target, group_cols=group_cols)
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
+    except Exception as e:
+        raise HTTPException(500, f"Hypothesis computation error: {type(e).__name__}") from e
     finally:
         del df
+        gc.collect()
 
 
 @router.post("/hypotheses")

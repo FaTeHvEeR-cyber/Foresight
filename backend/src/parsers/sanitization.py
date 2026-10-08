@@ -154,15 +154,23 @@ def validate_mime_and_extension(filename: str, content_type: str) -> bool:
             status_code=400,
         )
 
-    clean_filename = filename.strip()
+    clean_filename = (filename or "").strip()
+    if "\x00" in clean_filename or "%00" in clean_filename.lower():
+        raise MimeTypeError(
+            "Filename contains null byte characters (disallowed).",
+            filename=None,
+            content_type=content_type,
+            status_code=400,
+        )
     clean_mime = content_type.split(";")[0].strip().lower()
+    safe_filename = os.path.basename(clean_filename.replace("\\", "/"))
 
     # Extract extension
     parts = clean_filename.rsplit(".", 1)
     if len(parts) < 2 or not parts[0] or not parts[1]:
         raise MimeTypeError(
-            f"File '{clean_filename}' has no valid extension. Foresight requires an extension.",
-            filename=clean_filename,
+            f"File '{safe_filename}' has no valid extension. Foresight requires an extension.",
+            filename=safe_filename,
             content_type=clean_mime,
             status_code=415,
         )
@@ -310,16 +318,17 @@ def sanitize_tabular_cells(
         _sanitize_val(col) if isinstance(col, str) else col
         for col in sanitized_df.columns
     ]
-    seen_cols: Dict[str, int] = {}
+    used_names: Set[str] = set()
     deduped_cols = []
     for c in new_cols:
         col_str = str(c)
-        if col_str in seen_cols:
-            seen_cols[col_str] += 1
-            deduped_cols.append(f"{col_str}.{seen_cols[col_str]}")
-        else:
-            seen_cols[col_str] = 0
-            deduped_cols.append(c)
+        candidate = col_str
+        count = 1
+        while candidate in used_names:
+            candidate = f"{col_str}.{count}"
+            count += 1
+        used_names.add(candidate)
+        deduped_cols.append(candidate if isinstance(c, str) else type(c)(candidate))
     sanitized_df.columns = deduped_cols
 
     for col in sanitized_df.columns:

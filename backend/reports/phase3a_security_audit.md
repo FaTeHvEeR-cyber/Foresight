@@ -141,3 +141,32 @@ The Foresight Phase 3A analytics endpoints (`/api/v1/forecast`, `/api/v1/hypothe
 - **Vulnerabilities Remediated**: 1 (Finding 1: Header Formula Injection - CWE-1236).
 - **Residual Risk**: Zero HIGH or MEDIUM security defects remaining.
 - **Certification**: **APPROVED FOR PRODUCTION RUNTIME DEPLOYMENT**.
+
+---
+
+## 7. Addendum: Shared-Sanitizer Regression Sweep (2026-10-09)
+
+Following the second-pass audit of `POST /api/v1/segmentation`, shared code paths (`backend/src/parsers/sanitization.py`, `main.py`, `src/api/analytics_router.py`) were comprehensively audited across `POST /api/v1/upload`, `POST /api/v1/forecast`, and `POST /api/v1/hypotheses` under `backend/tests/test_shared_sanitizer_regression.py`:
+
+1. **Header Sanitization Collision Resilience**:
+   - Two-way (`=a`, `'=a`) and three-way (`=a`, `'=a`, `''=a`) collisions tested across all three endpoints.
+   - Disambiguated to unique, sanitized headers (`'=a'`, `''=a.1'`, etc.) using monotonic while-loop candidate checking.
+   - Result: 100% passing, zero duplicate column crashes or unhandled 500 errors.
+
+2. **Leading-Whitespace and Full-Width Unicode Formula Neutralization**:
+   - Ingested formulas with leading spaces, tabs, `\r`, `\n`, and combinations before `=`, `+`, `-`, `@`, plus full-width characters (`\uff1d`, `\uff0d`, `\uff0b`, `\uff20`).
+   - All cells and headers sanitized with leading quote (`'`). Verified via recursive response string scanning (`inspect_strings_for_raw_formulas`).
+   - Result: 100% neutralized, zero raw formula injections escaped to client responses.
+
+3. **Unhandled Exception Gap Remediation (Finding 3 Equivalent)**:
+   - Previously, `_forecast_job` and `_hypo_job` caught only `ValueError`, leaving non-`ValueError` runtime exceptions to bubble up to FastAPI, risking traceback leakage, and lacked `gc.collect()` in their `finally` blocks.
+   - Resolved by wrapping jobs with `except Exception as e: raise HTTPException(500, f"... computation error: {type(e).__name__}")` and ensuring `finally: del df; gc.collect()` executes unconditionally on all success and failure paths.
+   - Verified via monkeypatched runtime exceptions: returns clean HTTP 500 without stack trace, and mocks confirm `gc.collect()` invocation.
+
+4. **Filename Security and Zero Path Leakage**:
+   - Tested traversal paths (`../../x.csv`), Windows backslash paths (`..\\..\\secret\\x.csv`), 5,000-character names, and literal/URL-encoded null bytes (`\x00`, `%00`).
+   - `validate_mime_and_extension()` and `main.py` updated to sanitize filenames via `os.path.basename` and reject null bytes with HTTP 400.
+   - Verified zero leakage of traversal characters (`../`, `..\`) or server paths in all response bodies.
+
+- **Automated Verification**: **48 passed in 10.31s** (`backend/tests/test_shared_sanitizer_regression.py`).
+
