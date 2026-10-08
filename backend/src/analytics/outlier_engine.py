@@ -28,7 +28,8 @@ from src.analytics import feature_pipeline as fp
 
 logger = logging.getLogger("outlier_engine")
 
-MAX_LIVE_FIT_ROWS = 20_000
+FIT_CAP_ROWS = 10_000
+MAX_LIVE_FIT_ROWS = FIT_CAP_ROWS  # Backward-compatibility alias
 MAX_SCATTER_POINTS = 10_000
 MAX_OUTLIER_RECORDS = 100
 MAX_CORR_COLUMNS = 25
@@ -354,45 +355,60 @@ def run_segmentation(
         X_features, max_cols=MAX_CORR_COLUMNS
     )
 
-    # 3. Row-Cap & Subsampling (§4)
-    # Hard ceiling: 20,000 rows for live per-request fit path
-    if n_samples_raw > MAX_LIVE_FIT_ROWS:
+    # 3. 10,000-Row Fit-Cap (§WS-D)
+    # When N > 10,000, fit KMeans, Isolation Forest, and PCA on a random sample of 10,000 rows.
+    # All N rows are still scored, transformed, and assigned.
+    if n_samples_raw > FIT_CAP_ROWS:
         subsampled = True
         rng = np.random.default_rng(random_state)
-        sub_indices = rng.choice(n_samples_raw, size=MAX_LIVE_FIT_ROWS, replace=False)
-        sub_indices.sort()
-        X_fit = X_features.iloc[sub_indices].reset_index(drop=True)
-        context_fit = original_context.iloc[sub_indices].reset_index(drop=True)
+        fit_indices = rng.choice(n_samples_raw, size=FIT_CAP_ROWS, replace=False)
+        fit_indices.sort()
+        X_fit_df = X_features.iloc[fit_indices].reset_index(drop=True)
     else:
         subsampled = False
-        X_fit = X_features.reset_index(drop=True)
-        context_fit = original_context.reset_index(drop=True)
-
-    n_fit = len(X_fit)
+        fit_indices = None
+        X_fit_df = X_features
 
     # 4. Standard Scaling (contiguous float32 for fast vector math)
-    X_mat = np.ascontiguousarray(X_fit.to_numpy(dtype=np.float32))
+    X_mat_all = np.ascontiguousarray(X_features.to_numpy(dtype=np.float32))
     scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X_mat)
+    if subsampled:
+        X_mat_fit = np.ascontiguousarray(X_fit_df.to_numpy(dtype=np.float32))
+        scaler.fit(X_mat_fit)
+        X_scaled_all = scaler.transform(X_mat_all)
+        X_scaled_fit = X_scaled_all[fit_indices]
+    else:
+        X_scaled_all = scaler.fit_transform(X_mat_all)
+        X_scaled_fit = X_scaled_all
     t_scale = time.perf_counter()
 
-    # 5. Cluster Count & KMeans Fit (§1)
+    # 5. Cluster Count & KMeans Fit
+    n_fit = len(X_scaled_fit)
     optimal_k, clustering_method, sil_scores, fitted_models = select_optimal_k(
-        X_scaled, n_samples=n_fit, random_state=random_state
+        X_scaled_fit, n_samples=n_fit, random_state=random_state
     )
 
     # Retrieve pre-fit KMeans model (zero refitting overhead)
     final_kmeans = fitted_models.get(optimal_k)
     if final_kmeans is None:
-        final_kmeans = KMeans(n_clusters=optimal_k, random_state=random_state, n_init=1, max_iter=8, tol=1e-2, algorithm="lloyd")
-        final_kmeans.fit(X_scaled)
+        final_kmeans = KMeans(
+            n_clusters=optimal_k,
+            random_state=random_state,
+            n_init=1,
+            max_iter=8,
+            tol=1e-2,
+            algorithm="lloyd",
+        )
+        final_kmeans.fit(X_scaled_fit)
 
-    cluster_labels = final_kmeans.labels_
+    # Assign cluster labels for ALL N rows
+    cluster_labels = final_kmeans.predict(X_scaled_all)
     t_kmeans = time.perf_counter()
 
-    # 6. PCA (2D) Fit (§3)
+    # 6. PCA (2D) Fit on sample, transform ALL N rows
     pca = PCA(n_components=2, random_state=random_state)
-    pca_2d = pca.fit_transform(X_scaled)
+    pca.fit(X_scaled_fit)
+    pca_2d = pca.transform(X_scaled_all)
     pca_x_all = pca_2d[:, 0]
     pca_y_all = pca_2d[:, 1]
     t_pca = time.perf_counter()
@@ -409,16 +425,16 @@ def run_segmentation(
         random_state=random_state,
         n_jobs=1,
     )
-    iso.fit(X_scaled)
+    iso.fit(X_scaled_fit)
 
-    # Higher anomaly score = more anomalous
-    raw_scores = iso.score_samples(X_scaled)
+    # Score and predict ALL N rows
+    raw_scores = iso.score_samples(X_scaled_all)
     anomaly_scores = -raw_scores
-    is_outlier_all = iso.predict(X_scaled) == -1
+    is_outlier_all = iso.predict(X_scaled_all) == -1
     n_outliers = int(np.sum(is_outlier_all))
     t_iso = time.perf_counter()
 
-    # Extract Top 100 Outlier Records (§2) using argpartition for O(N) selection
+    # Extract Top 100 Outlier Records from ALL N rows using argpartition for O(N) selection
     if len(anomaly_scores) > MAX_OUTLIER_RECORDS:
         part_idx = np.argpartition(anomaly_scores, -MAX_OUTLIER_RECORDS)[-MAX_OUTLIER_RECORDS:]
         top_outlier_indices = part_idx[np.argsort(anomaly_scores[part_idx])[::-1]]
@@ -428,7 +444,7 @@ def run_segmentation(
     outlier_records: List[Dict[str, Any]] = []
 
     for rank, idx in enumerate(top_outlier_indices):
-        orig_row = context_fit.iloc[idx].to_dict()
+        orig_row = original_context.iloc[idx].to_dict()
         score = float(anomaly_scores[idx])
 
         # Resolve clean record ID
@@ -465,9 +481,9 @@ def run_segmentation(
         outlier_records.append(record)
 
     # 8. Scatter Payload Capping (§4)
-    # Cap at 10,000 points maximum, ALWAYS preserving all flagged outliers
-    if n_fit <= MAX_SCATTER_POINTS:
-        selected_scatter_indices = np.arange(n_fit)
+    # Cap at 10,000 points maximum, ALWAYS preserving all flagged outliers from all N rows
+    if n_samples_raw <= MAX_SCATTER_POINTS:
+        selected_scatter_indices = np.arange(n_samples_raw)
     else:
         outlier_idx_arr = np.where(is_outlier_all)[0]
         inlier_idx_arr = np.where(~is_outlier_all)[0]
@@ -499,6 +515,19 @@ def run_segmentation(
     t_end = time.perf_counter()
     compute_total_ms = round((t_end - t0) * 1000, 1)
 
+    # Tier-aware latency budget
+    if n_samples_raw <= 5_000:
+        budget = 200.0
+        budget_tier = "strict_200"
+    elif n_samples_raw <= 20_000:
+        budget = 500.0
+        budget_tier = "relaxed_500"
+    else:
+        budget = 500.0
+        budget_tier = "best_effort"
+
+    within_budget = compute_total_ms <= budget
+
     timing_ms = {
         "prepare_features": round((t_prep - t0) * 1000, 1),
         "scaling": round((t_scale - t_prep) * 1000, 1),
@@ -507,8 +536,9 @@ def run_segmentation(
         "isolation_forest": round((t_iso - t_pca) * 1000, 1),
         "payload_formatting": round((t_end - t_iso) * 1000, 1),
         "compute_total": compute_total_ms,
-        "budget": 200.0,
-        "within_budget": compute_total_ms <= 200.0,
+        "budget": budget,
+        "within_budget": within_budget,
+        "budget_tier": budget_tier,
     }
 
     result: Dict[str, Any] = {

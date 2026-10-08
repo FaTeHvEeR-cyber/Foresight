@@ -103,11 +103,26 @@ export interface HypothesisResponse {
   notes?: string[];
 }
 
+export interface SegmentationTiming {
+  prepare_features?: number;
+  scaling?: number;
+  kmeans_clustering?: number;
+  pca_projection?: number;
+  isolation_forest?: number;
+  payload_formatting?: number;
+  compute_total?: number;
+  budget?: number;
+  within_budget?: boolean;
+  budget_tier?: "strict_200" | "relaxed_500" | "best_effort";
+  load_parse?: number;
+}
+
 export interface SegmentationResponse {
   points: Array<{ x: number; y: number; clusterId: number }>;
   clusterCount: number;
   outlierMask: boolean[];
   outlierScoreMethod: "isolation_forest";
+  timing_ms?: SegmentationTiming;
 }
 
 /**

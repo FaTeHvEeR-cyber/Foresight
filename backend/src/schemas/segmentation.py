@@ -69,7 +69,7 @@ class SegmentationResponse(BaseModel):
     )
     subsampled: bool = Field(
         default=False,
-        description="True if the input dataset exceeded the 20,000 row ceiling and was subsampled",
+        description="True if the input dataset exceeded the 10,000 row fit cap and model training was subsampled",
     )
     original_row_count: int = Field(
         description="Total observation count prior to live fit subsampling"
@@ -115,5 +115,5 @@ class SegmentationResponse(BaseModel):
     )
     timing_ms: Optional[dict[str, Any]] = Field(
         default=None,
-        description="Detailed execution timing breakdown in milliseconds",
+        description="Detailed execution timing breakdown in milliseconds, including tier-aware budget, within_budget, and budget_tier ('strict_200', 'relaxed_500', 'best_effort')",
     )

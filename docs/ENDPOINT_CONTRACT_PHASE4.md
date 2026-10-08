@@ -297,10 +297,10 @@ export interface SegmentationSuccessResponse {
   correlation_matrix_truncated: boolean;
   
   // Dataset & Subsampling Metadata
-  subsampled: boolean;                  // true if raw rows exceeded 20,000 and were uniform-subsampled
+  subsampled: boolean;                  // true if raw rows exceeded 10,000 fit cap and model fit was subsampled
   original_row_count: number;           // Total valid rows in the uploaded table
   features_used: string[];              // Names of numeric features utilized for clustering
-  n_outliers: number;                   // Total outliers flagged in the fitted sample
+  n_outliers: number;                   // Total outliers flagged across all rows at 3% contamination rate
   contamination: number;                // Fixed operational contamination rate (0.03)
   silhouette_scores: Record<number, number>; // Subsampled silhouette scores per candidate K evaluated
   skew_transformed_columns: string[];   // Columns where np.log1p was applied (skew > 1.5)
@@ -312,9 +312,10 @@ export interface SegmentationSuccessResponse {
     pca_projection: number;             // 2D PCA fit and transform (ms)
     isolation_forest: number;           // Isolation Forest fit and sample scoring (ms)
     payload_formatting: number;         // Top-100 outlier sort and coordinate formatting (ms)
-    compute_total: number;              // Total algorithmic compute latency in ms (Budget: < 200ms)
-    budget: number;                     // 200.0 ms
+    compute_total: number;              // Total algorithmic compute latency in ms
+    budget: number;                     // 200.0 ms for N <= 5,000; 500.0 ms for N > 5,000
     within_budget: boolean;             // Whether compute_total <= budget
+    budget_tier: "strict_200" | "relaxed_500" | "best_effort"; // Gated for strict_200 and relaxed_500; best_effort not gated
   };
   
   recommended_visualization: RecommendedVisualization;

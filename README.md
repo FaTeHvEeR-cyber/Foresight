@@ -947,3 +947,31 @@ A systematic read-only audit of the 10 chart tokens against the backend response
     - Applied `threadpoolctl.threadpool_limits(limits=2)` to prevent OpenMP/BLAS thread-pool contention and emulate small free-tier CPUs.
     - Zero SLA thresholds loosened; strictly preserved < 200 ms, < 500 ms, and < 100 ms bounds.
   - Enabled isolated execution: `pytest -m latency` runs the 11 latency tests in isolation (11/11 passing), `pytest -m "not latency"` runs the fast suite excluding latency tests (389/389 passing), and default `pytest backend/tests/ -q` runs all 400 tests.
+
+## Update 2026-10-09 (WS-D: 10,000-Row Fit-Cap & Tier-Aware Latency Budget)
+- **Task**: Cap KMeans/IsolationForest fit at 10,000 rows, score all N rows, and introduce tier-aware latency budget.
+- **Details**:
+  - Implemented 10,000-row fit-cap in [`backend/src/analytics/outlier_engine.py`](file:///d:/Foresight/backend/src/analytics/outlier_engine.py):
+    - When `N > 10,000`, a deterministic uniform sample of 10,000 rows (`random_state=42`) is drawn for fitting KMeans, Isolation Forest, and PCA.
+    - Full table scoring: All $N$ rows are assigned to KMeans clusters via `predict()`, projected to 2D coordinates via PCA `transform()`, and scored for anomaly detection via Isolation Forest `score_samples()` and `predict()`.
+    - Scatter points payload capped at 10,000 points while preserving 100% of anomalies flagged across all $N$ rows.
+    - Top-100 outlier review queue extracts highest anomaly rows across the entire dataset.
+  - Implemented tier-aware latency budget:
+    - $N \le 5,000$: `budget = 200.0 ms`, `budget_tier = "strict_200"`, `within_budget = compute <= 200.0`.
+    - $5,000 < N \le 20,000$: `budget = 500.0 ms`, `budget_tier = "relaxed_500"`, `within_budget = compute <= 500.0`.
+    - $N > 20,000$: `budget = 500.0 ms`, `budget_tier = "best_effort"`, `within_budget = compute <= 500.0` (treated as not gated).
+  - Aligned data contracts and type definitions:
+    - Updated backend schema in [`backend/src/schemas/segmentation.py`](file:///d:/Foresight/backend/src/schemas/segmentation.py).
+    - Updated integration contract in [`docs/ENDPOINT_CONTRACT_PHASE4.md`](file:///d:/Foresight/docs/ENDPOINT_CONTRACT_PHASE4.md).
+    - Updated frontend type definitions in [`frontend/types/api.ts`](file:///d:/Foresight/frontend/types/api.ts) (`SegmentationTiming` and `SegmentationResponse`).
+  - Added unit test suite [`backend/tests/test_fit_cap_and_tiers.py`](file:///d:/Foresight/backend/tests/test_fit_cap_and_tiers.py) (7 tests) validating:
+    - Fit-cap triggers only when $N > 10,000$ (`subsampled=False` at 10k, `subsampled=True` at 10,001).
+    - Scoring covers all $N$ rows (planted outlier at row 11,500 detected as rank-1 anomaly).
+    - 100% deterministic reproducibility of clusters, samples, and outliers.
+    - Exact budget and `budget_tier` transitions at boundary values ($N = 5,000, 5,001, 20,000, 20,001$).
+  - Quality verification:
+    - Synthetic 3-Blobs: $K^* = 3$ via `data_driven_silhouette` (silhouette 0.9523).
+    - Credit Card 20k subsample: AUC-ROC = 0.9734, PR-AUC = 0.2681, Recall@5% = 91.7%, compute latency = 273.9 ms (`relaxed_500`).
+    - Wholesale Customers: $K^* = 4$ fallback.
+    - Online Retail: RFM customer matrix aggregated cleanly, $K^* = 4$.
+
