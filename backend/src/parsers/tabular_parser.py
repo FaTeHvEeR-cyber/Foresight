@@ -138,6 +138,10 @@ def infer_column_type(series: pd.Series) -> InferredType:
 
     # 4. String / Object sniffing
     sample = non_nulls.head(50)
+    # Fast path: strings > 100 characters are definitively text, avoiding expensive date regexes
+    if any(len(str(x)) > 100 for x in sample):
+        return "text"
+
     lower_sample = sample.astype(str).str.lower().str.strip()
 
     # Boolean strings

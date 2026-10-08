@@ -35,6 +35,7 @@ from src.parsers.sanitization import (
     FileSizeError,
     MimeTypeError,
     SanitizationError,
+    gatekeep_tabular_upload,
     sanitize_tabular_cells,
     validate_file_size,
     validate_mime_and_extension,
@@ -169,8 +170,9 @@ async def upload(file: Optional[UploadFile] = File(None)):
         detected_format: DetectedFormat = cast(DetectedFormat, ext)
         file_id = f"f_{uuid.uuid4().hex[:12]}"
 
-        # 4. For tabular: parse_tabular → sanitize_tabular_cells → compute_raw_null_profile → impute_for_modeling
+        # 4. For tabular: gatekeep → parse_tabular → sanitize_tabular_cells → compute_raw_null_profile → impute_for_modeling
         if detected_kind == "tabular":
+            gatekeep_tabular_upload(filename, file_bytes, file.content_type)
             try:
                 raw_df = parse_tabular(file_bytes, ext)
             except Exception as exc:

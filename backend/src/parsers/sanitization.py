@@ -11,8 +11,10 @@ Provides:
 - MimeTypeError & FileSizeError: Specific, clear exceptions for error handling in main.py.
 """
 
+import io
 import os
 from typing import Any, Dict, Optional, Set, Union
+import zipfile
 from fastapi import HTTPException
 import pandas as pd
 
@@ -386,18 +388,55 @@ def check_dangerous_and_magic_bytes(content: bytes, ext: str) -> None:
             detail="Disallowed binary signature detected: PNG image (disallowed)",
         )
 
-    # Format-specific magic checks
+    # Format-specific magic and resource-bound checks
     if ext == "parquet":
         if not content.startswith(PARQUET_MAGIC):
             raise HTTPException(
                 status_code=415,
                 detail="Missing PAR1 magic byte signature",
             )
+        try:
+            import pyarrow.parquet as pq
+            pf = pq.ParquetFile(io.BytesIO(content))
+            num_rows = pf.metadata.num_rows
+            if num_rows > 1_000_000:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Parquet row count exceeds limit ({num_rows:,} rows, max is 1,000,000).",
+                )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Corrupted or invalid Parquet file: {type(exc).__name__}",
+            )
     elif ext == "xlsx":
         if not content.startswith(ZIP_MAGIC):
             raise HTTPException(
                 status_code=415,
                 detail="Invalid ZIP archive: missing Office Open XML ZIP header",
+            )
+        try:
+            with zipfile.ZipFile(io.BytesIO(content)) as z:
+                total_uncompressed = sum(info.file_size for info in z.infolist())
+                sheet_count = len([info for info in z.infolist() if info.filename.startswith("xl/worksheets/sheet")])
+                if total_uncompressed > 100 * 1024 * 1024:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File uncompressed size exceeds limit ({total_uncompressed / (1024 * 1024):.1f} MB uncompressed, max is 100 MB).",
+                    )
+                if sheet_count > 50:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Excel workbook sheet count exceeds limit ({sheet_count} sheets found, max is 50).",
+                    )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Corrupted or invalid XLSX archive: {type(exc).__name__}",
             )
     elif ext == "xls":
         if not content.startswith(XLS_OLE_MAGIC):
@@ -410,6 +449,15 @@ def check_dangerous_and_magic_bytes(content: bytes, ext: str) -> None:
             raise HTTPException(
                 status_code=415,
                 detail="Contains null byte binary data: Binary or malformed content detected (disallowed).",
+            )
+        first_newline = content.find(b"\n")
+        header_sample = content[:first_newline] if first_newline != -1 else content
+        sep = b"\t" if ext == "tsv" else b","
+        col_count = header_sample.count(sep) + 1
+        if col_count > 10_000:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Table column count exceeds maximum limit ({col_count:,} columns found, max is 10,000).",
             )
 
 
