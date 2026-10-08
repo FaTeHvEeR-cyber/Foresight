@@ -230,14 +230,23 @@ Agent Split:
 
 | Endpoint | Recommended Enum | Required Payload Fields Verified | Status |
 | :--- | :--- | :--- | :---: |
-| POST /api/v1/forecast | line_chart | series.dates, series.actuals, orecast.dates, orecast.values | **PASS** |
-| POST /api/v1/forecast | orecast_band_chart | orecast.lower, orecast.upper | **PASS** |
+| POST /api/v1/forecast | line_chart | series.dates, series.actuals, forecast.dates, forecast.values | **PASS** |
+| POST /api/v1/forecast | forecast_band_chart | forecast.lower, forecast.upper | **PASS** |
 | POST /api/v1/forecast | kpi_card | status, dataset.target, metrics | **PASS** |
-| POST /api/v1/hypotheses | ar_comparison | group, mean, std, 
- (capped at 12 groups) | **PASS** |
-| POST /api/v1/hypotheses | ox_plot | min, q1, median, q3, max (monotonicity verified) | **PASS** |
-| POST /api/v1/segmentation | scatter_cluster | 2D PCA projection coordinates (Engine B) | **PENDING** |
-| POST /api/v1/segmentation | heatmap_correlation| Correlation matrices | **PENDING** |
-| POST /api/v1/segmentation | outlier_table | es.anomalies | **PENDING** |
-| POST /api/v1/segmentation | histogram_distribution| es.bins | **PENDING** |
-| POST /api/v1/segmentation | ar_line_combo | Aggregations (volume/rates) | **PENDING** |
+| POST /api/v1/hypotheses | bar_comparison | group, mean, std, n (capped at 12 groups) | **PASS** |
+| POST /api/v1/hypotheses | box_plot | min, q1, median, q3, max (monotonicity verified) | **PASS** |
+| POST /api/v1/segmentation | scatter_cluster | 2D PCA projection coordinates (Engine B) | **PASS** |
+| POST /api/v1/segmentation | heatmap_correlation| Correlation matrices | **PASS** |
+| POST /api/v1/segmentation | outlier_table | anomalies / top outliers table | **PASS** |
+| POST /api/v1/segmentation | histogram_distribution| distribution bins | **PASS** |
+| POST /api/v1/segmentation | bar_line_combo | Aggregations (volume/rates) | **PASS** |
+
+---
+
+## 10. Phase 3B Hardening & Follow-Up Verification
+
+- **Milestone**: Phase 3B Follow-up Hardening, 10k Fit-Cap, and Security Audit certification.
+- **Backend Suite**: 407 / 407 tests passed (100% Green).
+- **Latency Suite**: 11 / 11 tests passed in isolation via pytest -m latency.
+- **Security Audit**: Completed in backend/reports/phase3b_security_audit.md with 5 vectors verified across 53 tests. All critical findings remediated; zero unhandled 500 exceptions across parser, forecast, hypotheses, and segmentation endpoints.
+- **Status**: Phase 3B certified and closed. Phase 4 fully unblocked.
