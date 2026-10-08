@@ -33,6 +33,9 @@ pythonpath = [
     "src",
     "app",
 ]
+markers = [
+    "latency: latency and SLA timing tests",
+]
 
 [tool.pyright]
 extraPaths = [

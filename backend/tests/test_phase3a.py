@@ -73,14 +73,26 @@ def test_features_never_use_current_target(bike_df):
 
 
 # ------------------------------------------------------------------ engines
+@pytest.mark.latency
 def test_forecast_quality_and_latency_on_bike(bike_df):
+    import statistics
+    import threadpoolctl
+
     prep = fp.prepare_series(bike_df, target="cnt")
-    run_forecast(prep)                                    # warm-up (xgboost import/JIT)
-    res = run_forecast(prep, horizon=14)
-    assert res["status"] == "ok" and len(res["forecast"]["dates"]) == 14
-    assert res["metrics"]["ridge"]["r2"] > 0.5 or res["metrics"]["xgboost"]["r2"] > 0.5
-    assert res["timing_ms"]["compute_total"] < 200, res["timing_ms"]
-    assert all(v >= 0 for v in res["forecast"]["lower"])
+    with threadpoolctl.threadpool_limits(limits=2):
+        run_forecast(prep, horizon=14)  # warm-up (xgboost import/JIT)
+        timings = []
+        last_res = None
+        for _ in range(5):
+            res = run_forecast(prep, horizon=14)
+            last_res = res
+            timings.append(res["timing_ms"]["compute_total"])
+        med_compute = float(statistics.median(timings))
+
+    assert last_res["status"] == "ok" and len(last_res["forecast"]["dates"]) == 14
+    assert last_res["metrics"]["ridge"]["r2"] > 0.5 or last_res["metrics"]["xgboost"]["r2"] > 0.5
+    assert med_compute < 200, f"Median compute {med_compute}ms exceeded 200ms budget: {timings}"
+    assert all(v >= 0 for v in last_res["forecast"]["lower"])
 
 
 def test_welch_promo_lift(promo_df):

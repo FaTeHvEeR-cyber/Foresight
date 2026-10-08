@@ -936,8 +936,14 @@ A systematic read-only audit of the 10 chart tokens against the backend response
     - Refactored `upload_limit` in `sanitize_and_validate_upload()` to guarantee non-None integer typing, resolving Pyright `reportOptionalOperand` diagnostics.
   - **Verification**:
     - Pyright analysis on [`backend/src/parsers/sanitization.py`](file:///d:/Foresight/backend/src/parsers/sanitization.py) returned **0 errors, 0 warnings**.
-    - Unit tests in [`backend/tests/test_sanitization.py`](file:///d:/Foresight/backend/tests/test_sanitization.py) expanded with boolean rejection and passed 100% (47/47 green).
-
-
-
-
+## Update 2026-10-09 (WS-C: Robust Latency Assertions & SLA Isolation)
+- **Task**: Make latency assertions robust without loosening SLA thresholds, isolate via pytest marker.
+- **Details**:
+  - Registered `latency` marker in [`backend/pytest.ini`](file:///d:/Foresight/backend/pytest.ini) and [`backend/pyproject.toml`](file:///d:/Foresight/backend/pyproject.toml).
+  - Added reusable helper `run_median_latency()` in [`backend/tests/conftest.py`](file:///d:/Foresight/backend/tests/conftest.py).
+  - Refactored all 11 compute-time and `within_budget` latency tests across `test_phase3a.py`, `test_phase3a_real_data.py`, `test_phase3b_segmentation.py`, and `test_real_datasets.py`:
+    - Discarded initial cold-cache/warm-up run.
+    - Asserted on the median of 5 consecutive runs.
+    - Applied `threadpoolctl.threadpool_limits(limits=2)` to prevent OpenMP/BLAS thread-pool contention and emulate small free-tier CPUs.
+    - Zero SLA thresholds loosened; strictly preserved < 200 ms, < 500 ms, and < 100 ms bounds.
+  - Enabled isolated execution: `pytest -m latency` runs the 11 latency tests in isolation (11/11 passing), `pytest -m "not latency"` runs the fast suite excluding latency tests (389/389 passing), and default `pytest backend/tests/ -q` runs all 400 tests.

@@ -12,6 +12,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import statistics
+import threadpoolctl
 import numpy as np
 import pandas as pd
 import pytest
@@ -45,6 +47,7 @@ def _get_dataset_path(filename: str) -> Path:
 # 1. Real Airline Passengers Dataset (Monthly Series)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.latency
 def test_real_airline_passengers_validation():
     path = _get_dataset_path("airline-passengers.csv")
     df = pd.read_csv(path)
@@ -59,22 +62,31 @@ def test_real_airline_passengers_validation():
     assert 12 in lags
     assert 7 not in lags
 
-    # Forecast execution (with warm-up)
-    run_forecast(prep)
-    res = run_forecast(prep, horizon=12)
-    assert res["status"] == "ok"
-    assert len(res["forecast"]["dates"]) == 12
-    assert len(res["forecast"]["values"]) == 12
-    assert all(v > 0 for v in res["forecast"]["values"]), "Airline passenger forecasts must be positive"
-    assert all(v >= 0 for v in res["forecast"]["lower"]), "Lower confidence bound must be non-negative"
-    assert res["selected_model"] in ("ridge", "xgboost")
-    assert res["timing_ms"]["compute_total"] < 200, f"Compute exceeded budget: {res['timing_ms']}"
+    # Forecast execution (with warm-up + median of 5 runs under thread limits)
+    with threadpoolctl.threadpool_limits(limits=2):
+        run_forecast(prep, horizon=12)  # warm-up
+        timings = []
+        last_res = None
+        for _ in range(5):
+            res = run_forecast(prep, horizon=12)
+            last_res = res
+            timings.append(res["timing_ms"]["compute_total"])
+        med_compute = float(statistics.median(timings))
+
+    assert last_res["status"] == "ok"
+    assert len(last_res["forecast"]["dates"]) == 12
+    assert len(last_res["forecast"]["values"]) == 12
+    assert all(v > 0 for v in last_res["forecast"]["values"]), "Airline passenger forecasts must be positive"
+    assert all(v >= 0 for v in last_res["forecast"]["lower"]), "Lower confidence bound must be non-negative"
+    assert last_res["selected_model"] in ("ridge", "xgboost")
+    assert med_compute < 200, f"Median compute {med_compute}ms exceeded budget: {timings}"
 
 
 # ---------------------------------------------------------------------------
 # 2. Real Bike Sharing Dataset (Daily Series & Leakage Prevention)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.latency
 def test_real_bike_sharing_validation():
     path = _get_dataset_path("day.csv")
     df = pd.read_csv(path)
@@ -92,31 +104,49 @@ def test_real_bike_sharing_validation():
     # Ensure exogenous columns do not contain the dropped columns
     assert not any("casual" in c or "registered" in c for c in prep.exog.columns)
 
-    # Forecast execution (with warm-up)
-    run_forecast(prep)
-    res = run_forecast(prep, horizon=14)
-    assert res["status"] == "ok"
-    assert len(res["forecast"]["dates"]) == 14
-    assert res["selected_model"] in ("ridge", "xgboost")
+    # Forecast execution (with warm-up + median of 5 runs under thread limits)
+    with threadpoolctl.threadpool_limits(limits=2):
+        run_forecast(prep, horizon=14)  # warm-up
+        timings = []
+        last_res = None
+        for _ in range(5):
+            res = run_forecast(prep, horizon=14)
+            last_res = res
+            timings.append(res["timing_ms"]["compute_total"])
+        med_compute = float(statistics.median(timings))
+
+    assert last_res["status"] == "ok"
+    assert len(last_res["forecast"]["dates"]) == 14
+    assert last_res["selected_model"] in ("ridge", "xgboost")
     # Holdout R2 should show genuine predictive capability
-    sel = res["selected_model"]
-    assert res["metrics"][sel]["r2"] is not None
-    assert res["timing_ms"]["compute_total"] < 500, f"Compute took {res['timing_ms']['compute_total']}ms"
+    sel = last_res["selected_model"]
+    assert last_res["metrics"][sel]["r2"] is not None
+    assert med_compute < 500, f"Median compute {med_compute}ms exceeded budget: {timings}"
 
 
 # ---------------------------------------------------------------------------
 # 3. Real Wholesale Customers Dataset (Parametric & Non-Parametric Hypotheses)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.latency
 def test_real_wholesale_customers_hypotheses():
     path = _get_dataset_path("Wholesale customers data.csv")
     df = pd.read_csv(path)
 
-    res = run_hypotheses(df, target="Fresh")
-    assert res["status"] == "ok"
-    assert len(res["tests"]) >= 2
+    with threadpoolctl.threadpool_limits(limits=2):
+        run_hypotheses(df, target="Fresh")  # warm-up
+        timings = []
+        last_res = None
+        for _ in range(5):
+            res = run_hypotheses(df, target="Fresh")
+            last_res = res
+            timings.append(res["timing_ms"]["compute_total"])
+        med_compute = float(statistics.median(timings))
 
-    test_by_col = {t["grouping_column"]: t for t in res["tests"]}
+    assert last_res["status"] == "ok"
+    assert len(last_res["tests"]) >= 2
+
+    test_by_col = {t["grouping_column"]: t for t in last_res["tests"]}
     assert "Channel" in test_by_col
     assert "Region" in test_by_col
 
@@ -136,7 +166,7 @@ def test_real_wholesale_customers_hypotheses():
     assert "p_value_adjusted" in region_test
 
     # Timing
-    assert res["timing_ms"]["compute_total"] < 100, f"Hypotheses took {res['timing_ms']['compute_total']}ms"
+    assert med_compute < 100, f"Median hypotheses compute {med_compute}ms exceeded budget: {timings}"
 
 
 # ---------------------------------------------------------------------------
@@ -200,28 +230,39 @@ def test_real_benchmark_promo_lift():
 # 6. REST API Endpoints with Real Payloads
 # ---------------------------------------------------------------------------
 
+@pytest.mark.latency
 def test_api_real_bike_forecast():
     path = _get_dataset_path("day.csv")
     raw = path.read_bytes()
 
-    # Warm-up request
-    client.post(
-        "/api/v1/forecast",
-        files={"file": ("day.csv", raw)},
-        data={"target": "cnt", "horizon": "14", "use_llm": "false"},
-    )
-    r = client.post(
-        "/api/v1/forecast",
-        files={"file": ("day.csv", raw)},
-        data={"target": "cnt", "horizon": "14", "use_llm": "false"},
-    )
-    assert r.status_code == 200
-    j = r.json()
-    assert j["status"] == "ok"
-    assert j["dataset"]["frequency"] == "daily"
-    assert len(j["forecast"]["values"]) == 14
-    assert j["recommended_visualization"]["chart"] == "line_chart"
-    assert j["timing_ms"]["within_budget"] is True
+    with threadpoolctl.threadpool_limits(limits=2):
+        # Warm-up request
+        client.post(
+            "/api/v1/forecast",
+            files={"file": ("day.csv", raw)},
+            data={"target": "cnt", "horizon": "14", "use_llm": "false"},
+        )
+        timings = []
+        within_budgets = []
+        last_j = None
+        for _ in range(5):
+            r = client.post(
+                "/api/v1/forecast",
+                files={"file": ("day.csv", raw)},
+                data={"target": "cnt", "horizon": "14", "use_llm": "false"},
+            )
+            assert r.status_code == 200
+            j = r.json()
+            last_j = j
+            timings.append(j["timing_ms"]["compute_total"])
+            within_budgets.append(j["timing_ms"]["within_budget"])
+
+    assert last_j["status"] == "ok"
+    assert last_j["dataset"]["frequency"] == "daily"
+    assert len(last_j["forecast"]["values"]) == 14
+    assert last_j["recommended_visualization"]["chart"] == "line_chart"
+    assert all(within_budgets), f"Forecast exceeded budget across runs: {timings}"
+    assert last_j["timing_ms"]["within_budget"] is True
 
 
 def test_api_real_wholesale_hypotheses():

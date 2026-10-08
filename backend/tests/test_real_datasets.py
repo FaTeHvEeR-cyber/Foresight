@@ -28,6 +28,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import statistics
+import threadpoolctl
 import numpy as np
 import pandas as pd
 import pytest
@@ -61,6 +63,7 @@ def _get_dataset_path(*filenames: str) -> Path:
 # 1. day.csv
 # ---------------------------------------------------------------------------
 
+@pytest.mark.latency
 def test_day_csv_forecast_and_leakage_prevention():
     """day.csv: date format detected day-first; instant, casual, registered dropped when target=cnt;
     forecast returns; no leakage warning.
@@ -92,19 +95,32 @@ def test_day_csv_forecast_and_leakage_prevention():
         assert "leakage" not in note.lower(), f"Unexpected leakage warning in notes: {note}"
 
     # 4. API endpoint verification: /api/v1/forecast returns valid predictions
-    r = client.post(
-        "/api/v1/forecast",
-        files={"file": ("day.csv", raw)},
-        data={"target": "cnt", "horizon": "14", "use_llm": "false"},
-    )
-    assert r.status_code == 200
-    res = r.json()
-    assert res["status"] == "ok"
-    assert res["dataset"]["date_format"] == "day-first"
-    assert len(res["forecast"]["values"]) == 14
-    assert len(res["forecast"]["dates"]) == 14
-    assert all(v >= 0 for v in res["forecast"]["values"])
-    assert res["timing_ms"]["compute_total"] < 500
+    with threadpoolctl.threadpool_limits(limits=2):
+        client.post(
+            "/api/v1/forecast",
+            files={"file": ("day.csv", raw)},
+            data={"target": "cnt", "horizon": "14", "use_llm": "false"},
+        )
+        timings = []
+        last_res = None
+        for _ in range(5):
+            r = client.post(
+                "/api/v1/forecast",
+                files={"file": ("day.csv", raw)},
+                data={"target": "cnt", "horizon": "14", "use_llm": "false"},
+            )
+            assert r.status_code == 200
+            res = r.json()
+            last_res = res
+            timings.append(res["timing_ms"]["compute_total"])
+        med_compute = float(statistics.median(timings))
+
+    assert last_res["status"] == "ok"
+    assert last_res["dataset"]["date_format"] == "day-first"
+    assert len(last_res["forecast"]["values"]) == 14
+    assert len(last_res["forecast"]["dates"]) == 14
+    assert all(v >= 0 for v in last_res["forecast"]["values"])
+    assert med_compute < 500, f"Median compute {med_compute}ms exceeded 500ms budget: {timings}"
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +169,7 @@ def test_airline_passengers_monthly_short_series_and_skill():
 # 3. online_retail.csv
 # ---------------------------------------------------------------------------
 
+@pytest.mark.latency
 def test_online_retail_50mb_encoding_filtering_and_compute():
     """online_retail.csv: passes the 50 MB gate; loads with correct encoding;
     cancellations filtered; daily net revenue series; cancellation count present in data_quality;
@@ -183,29 +200,52 @@ def test_online_retail_50mb_encoding_filtering_and_compute():
     assert dq["cancellation_invoices"] > 0
 
     # 5. End-to-end model compute under 200 ms (load/parse reported separately)
-    # Warm up first
-    run_forecast(prep, horizon=14)
-    res = run_forecast(prep, horizon=14)
-    assert res["status"] == "ok"
-    assert len(res["forecast"]["values"]) == 14
-    compute_total_ms = res["timing_ms"]["compute_total"]
-    assert compute_total_ms < 200, (
-        f"Model compute {compute_total_ms}ms exceeded 200ms budget: {res['timing_ms']}"
+    with threadpoolctl.threadpool_limits(limits=2):
+        # Warm up first
+        run_forecast(prep, horizon=14)
+        engine_timings = []
+        last_engine_res = None
+        for _ in range(5):
+            res = run_forecast(prep, horizon=14)
+            last_engine_res = res
+            engine_timings.append(res["timing_ms"]["compute_total"])
+        med_engine_compute = float(statistics.median(engine_timings))
+
+    assert last_engine_res["status"] == "ok"
+    assert len(last_engine_res["forecast"]["values"]) == 14
+    assert med_engine_compute < 200, (
+        f"Model median compute {med_engine_compute}ms exceeded 200ms budget: {engine_timings}"
     )
 
     # API verification: load_parse is reported separately from compute_total
-    r = client.post(
-        "/api/v1/forecast",
-        files={"file": ("online_retail.csv", raw)},
-        data={"use_llm": "false"},
-    )
-    assert r.status_code == 200
-    api_res = r.json()
-    assert api_res["status"] == "ok"
-    tm = api_res["timing_ms"]
+    with threadpoolctl.threadpool_limits(limits=2):
+        client.post(
+            "/api/v1/forecast",
+            files={"file": ("online_retail.csv", raw)},
+            data={"use_llm": "false"},
+        )
+        api_timings = []
+        within_budgets = []
+        last_api_res = None
+        for _ in range(5):
+            r = client.post(
+                "/api/v1/forecast",
+                files={"file": ("online_retail.csv", raw)},
+                data={"use_llm": "false"},
+            )
+            assert r.status_code == 200
+            api_res = r.json()
+            last_api_res = api_res
+            api_timings.append(api_res["timing_ms"]["compute_total"])
+            within_budgets.append(api_res["timing_ms"]["within_budget"])
+        med_api_compute = float(statistics.median(api_timings))
+
+    assert last_api_res["status"] == "ok"
+    tm = last_api_res["timing_ms"]
     assert "load_parse" in tm, "load_parse timing must be reported separately"
     assert "compute_total" in tm, "compute_total must be reported"
-    assert tm["compute_total"] < 200, f"API model compute exceeded 200ms: {tm}"
+    assert med_api_compute < 200, f"API model median compute {med_api_compute}ms exceeded 200ms: {api_timings}"
+    assert all(within_budgets), f"API within_budget failed: {api_timings}"
     assert tm["within_budget"] is True
 
 

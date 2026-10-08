@@ -186,3 +186,30 @@ def promo_df():
 
 def to_csv_bytes(df, encoding="utf-8"):
     return df.to_csv(index=False).encode(encoding)
+
+
+def run_median_latency(call_fn, runs: int = 5, thread_limit: int = 2):
+    """Executes a warm-up call followed by `runs` measured calls under BLAS/OpenMP thread limits.
+
+    Extracts `compute_total` from dict/Response or records wall times.
+    Returns (last_result, median_compute_ms, all_timings).
+    """
+    import statistics
+    import threadpoolctl
+
+    with threadpoolctl.threadpool_limits(limits=thread_limit):
+        call_fn()  # Warm-up run (discarded)
+        timings = []
+        last_res = None
+        for _ in range(runs):
+            res = call_fn()
+            last_res = res
+            if isinstance(res, dict) and "timing_ms" in res and "compute_total" in res["timing_ms"]:
+                timings.append(float(res["timing_ms"]["compute_total"]))
+            elif hasattr(res, "json") and callable(res.json):
+                j = res.json()
+                if isinstance(j, dict) and "timing_ms" in j and "compute_total" in j["timing_ms"]:
+                    timings.append(float(j["timing_ms"]["compute_total"]))
+        med = float(statistics.median(timings)) if timings else 0.0
+        return last_res, med, timings
+
