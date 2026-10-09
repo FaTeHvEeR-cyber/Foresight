@@ -169,8 +169,8 @@ class TestResourceBoundsEvidence:
         assert res.status_code == 413
         assert "Parquet row count exceeds limit" in res.text
 
-    def test_case4a_csv_enormous_single_cell_fast(self):
-        """CSV with a 30MB string in a single cell completes fast (< 5s) without crashing."""
+    def test_case4a_csv_enormous_single_cell_rejected_413(self):
+        """CSV with a 30MB string in a single cell is rejected pre-parse with HTTP 413 (< 1s)."""
         huge_cell = "A" * (30 * 1024 * 1024)
         content = f"date,sales,huge_cell\n2020-01-01,100.0,{huge_cell}\n2020-01-02,110.0,normal\n".encode("utf-8")
 
@@ -180,8 +180,23 @@ class TestResourceBoundsEvidence:
             files={"file": ("huge_cell.csv", content, "text/csv")},
         )
         elapsed = time.perf_counter() - t0
+        assert res.status_code == 413
+        assert "exceeds maximum limit" in res.text
+        assert elapsed < 1.0, f"Upload rejection took too long: {elapsed:.2f}s"
+
+    def test_case4a_csv_valid_large_single_cell_allowed_200(self):
+        """CSV with a 1MB string in a single cell completes fast (< 5s) with HTTP 200."""
+        large_cell = "A" * (1024 * 1024)
+        content = f"date,sales,huge_cell\n2020-01-01,100.0,{large_cell}\n2020-01-02,110.0,normal\n".encode("utf-8")
+
+        t0 = time.perf_counter()
+        res = client.post(
+            "/api/v1/upload",
+            files={"file": ("large_cell.csv", content, "text/csv")},
+        )
+        elapsed = time.perf_counter() - t0
         assert res.status_code == 200
-        assert elapsed < 5.0, f"Upload took too long on huge cell: {elapsed:.2f}s"
+        assert elapsed < 5.0, f"Upload took too long: {elapsed:.2f}s"
 
     def test_case4b_csv_50k_columns_rejected_422(self):
         """CSV with 50,000 columns is rejected with HTTP 422 pre-parse (< 1s)."""

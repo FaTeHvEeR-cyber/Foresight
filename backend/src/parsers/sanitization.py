@@ -459,6 +459,26 @@ def check_dangerous_and_magic_bytes(content: bytes, ext: str) -> None:
                 status_code=422,
                 detail=f"Table column count exceeds maximum limit ({col_count:,} columns found, max is 10,000).",
             )
+        # Single field or row length pre-parse guard (10 MB maximum limit)
+        max_field_bytes = 10 * 1024 * 1024
+        if len(content) > max_field_bytes:
+            pos = 0
+            n = len(content)
+            while pos < n:
+                next_nl = content.find(b"\n", pos)
+                if next_nl == -1:
+                    if n - pos > max_field_bytes:
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f"Single field or row length exceeds maximum limit ({n - pos:,} bytes, max is {max_field_bytes:,} bytes).",
+                        )
+                    break
+                if next_nl - pos > max_field_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Single field or row length exceeds maximum limit ({next_nl - pos:,} bytes, max is {max_field_bytes:,} bytes).",
+                    )
+                pos = next_nl + 1
 
 
 def gatekeep_tabular_upload(

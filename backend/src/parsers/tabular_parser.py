@@ -112,7 +112,19 @@ def parse_tabular(file_bytes: bytes, extension: str) -> pd.DataFrame:
         raise ValueError(f"Unsupported tabular extension: {extension}")
 
     # Downcast numeric columns on ingestion to cut memory footprint (spec §5.2)
-    return downcast_numeric_columns(df)
+    df = downcast_numeric_columns(df)
+
+    # Cell size guardrail: reject individual fields exceeding 10 MB
+    for col in df.select_dtypes(include=["object", "string"]).columns:
+        s = df[col].dropna().astype(str)
+        if not s.empty:
+            max_cell_len = int(s.map(len).max())
+            if max_cell_len > 10 * 1024 * 1024:
+                raise ValueError(
+                    f"Single field length exceeds maximum limit ({max_cell_len:,} characters in column '{col}', max is 10,485,760)."
+                )
+
+    return df
 
 
 def infer_column_type(series: pd.Series) -> InferredType:
