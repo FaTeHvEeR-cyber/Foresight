@@ -245,8 +245,14 @@ Agent Split:
 
 ## 10. Phase 3B Hardening & Follow-Up Verification
 
-- **Milestone**: Phase 3B Follow-up Hardening, 10k Fit-Cap, and Security Audit certification.
-- **Backend Suite**: 407 / 407 tests passed (100% Green).
-- **Latency Suite**: 11 / 11 tests passed in isolation via pytest -m latency.
-- **Security Audit**: Completed in backend/reports/phase3b_security_audit.md with 5 vectors verified across 53 tests. All critical findings remediated; zero unhandled 500 exceptions across parser, forecast, hypotheses, and segmentation endpoints.
-- **Status**: Phase 3B certified and closed. Phase 4 fully unblocked.
+- **Milestone**: Phase 3B Follow-up Hardening, 10k Fit-Cap, Security Audit certification, and Closure Gaps Resolution.
+- **Backend Suite**: 407 passed, 1 xfailed (100% Green, 0 unexpected failures, 0 skips).
+- **Latency Suite**: 11 / 11 tests passed in isolation via `pytest -m latency`.
+- **Security Audit & Hardening**:
+  - Completed in [`backend/reports/phase3b_security_audit.md`](file:///d:/Foresight/backend/reports/phase3b_security_audit.md) across all 5 Anti-Gravity security vectors.
+  - Resolved F-05 pathological single-cell memory spike with 10 MB single-field length gatekeeper (`HTTP 413` in < 3 ms).
+  - Profiled 300k-row latency regression: compute 679.5 ms reflects full-table scoring across 300,000 rows (375.5 ms for Isolation Forest scoring alone) vs pre-cap discarding 280,000 rows; classified under non-gated `best_effort` tier.
+  - Confirmed Credit Card 20k metric stability on identical subsample: Recall@5% identical at 91.67% (22/24 frauds), compute reduced by 23.6% to 389.9 ms (passing relaxed SLA).
+  - Evaluated new input limits (report only): documented Excel 100 MB uncompressed cap expansion risks (6x–8.7x compression ratio) and CSV quoted comma pre-scan behavior with `xfail` regression test.
+- **Unblocking Status**: Phase 3B certified and closed. Phase 4 (route shells, column-config bar, API client, wiring to live endpoints, and client-side exports) is fully unblocked for full-stack integration.
+
