@@ -11,6 +11,7 @@ Provides:
 - MimeTypeError & FileSizeError: Specific, clear exceptions for error handling in main.py.
 """
 
+import csv
 import io
 import os
 from typing import Any, Dict, Optional, Set, Union
@@ -450,15 +451,6 @@ def check_dangerous_and_magic_bytes(content: bytes, ext: str) -> None:
                 status_code=415,
                 detail="Contains null byte binary data: Binary or malformed content detected (disallowed).",
             )
-        first_newline = content.find(b"\n")
-        header_sample = content[:first_newline] if first_newline != -1 else content
-        sep = b"\t" if ext == "tsv" else b","
-        col_count = header_sample.count(sep) + 1
-        if col_count > 10_000:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Table column count exceeds maximum limit ({col_count:,} columns found, max is 10,000).",
-            )
         # Single field or row length pre-parse guard (10 MB maximum limit)
         max_field_bytes = 10 * 1024 * 1024
         if len(content) > max_field_bytes:
@@ -479,6 +471,60 @@ def check_dangerous_and_magic_bytes(content: bytes, ext: str) -> None:
                         detail=f"Single field or row length exceeds maximum limit ({next_nl - pos:,} bytes, max is {max_field_bytes:,} bytes).",
                     )
                 pos = next_nl + 1
+
+        # Header record pre-parse with csv module (bounded prefix, never reading whole file)
+        delim = "\t" if ext == "tsv" else ","
+        start_pos = 3 if content.startswith(b"\xef\xbb\xbf") else 0
+
+        def _iter_header_lines():
+            pos = start_pos
+            n = len(content)
+            consumed = 0
+            while pos < n:
+                next_nl = content.find(b"\n", pos)
+                if next_nl == -1:
+                    chunk = content[pos:]
+                    pos = n
+                else:
+                    chunk = content[pos : next_nl + 1]
+                    pos = next_nl + 1
+                consumed += len(chunk)
+                if consumed > max_field_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Single field or row length exceeds maximum limit ({consumed:,} bytes, max is {max_field_bytes:,} bytes).",
+                    )
+                yield chunk.decode("utf-8", errors="replace")
+
+        csv.field_size_limit(max_field_bytes)
+        reader = csv.reader(_iter_header_lines(), delimiter=delim, strict=True)
+        try:
+            header = next(reader)
+        except StopIteration:
+            raise HTTPException(
+                status_code=422,
+                detail="Table header record is empty or invalid.",
+            )
+        except HTTPException:
+            raise
+        except csv.Error as exc:
+            err_msg = str(exc)
+            if "field larger than field limit" in err_msg:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Single field or row length exceeds maximum limit ({max_field_bytes:,} bytes limit exceeded).",
+                )
+            raise HTTPException(
+                status_code=422,
+                detail=f"Malformed CSV/TSV table header record: {err_msg}",
+            )
+
+        col_count = len(header)
+        if col_count > 10_000:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Table column count exceeds maximum limit ({col_count:,} columns found, max is 10,000).",
+            )
 
 
 def gatekeep_tabular_upload(

@@ -262,9 +262,6 @@ def test_sanitize_tabular_cells_categorical_series():
     assert clean_df["cat"].iloc[2] == "'=formula_cat"
 
 
-@pytest.mark.xfail(
-    reason="CSV header delimiter pre-scan counts commas inside quoted header names without respecting quote boundaries, falsely rejecting valid wide tables"
-)
 def test_csv_quoted_commas_in_header_not_miscounted():
     """Verify CSV header pre-scan with quoted commas does not falsely exceed column limit."""
     # 6,000 columns with quoted commas (e.g. "col,1", "col,2", ...).
@@ -275,6 +272,78 @@ def test_csv_quoted_commas_in_header_not_miscounted():
     csv_bytes = (",".join(headers) + "\n" + ",".join(row) + "\n").encode("utf-8")
 
     from src.parsers.sanitization import check_dangerous_and_magic_bytes
-    # Should not raise HTTPException(422) if quoted commas were respected
+    # Should not raise HTTPException(422) now that quoted commas are respected
     check_dangerous_and_magic_bytes(csv_bytes, "csv")
+
+
+def test_tsv_quoted_tabs_in_header_not_miscounted():
+    """Verify TSV header pre-scan with quoted tabs does not falsely miscount columns."""
+    from src.parsers.sanitization import check_dangerous_and_magic_bytes
+    tsv_bytes = b'"col\t1"\t"col\t2"\tcol3\tcol4\tcol5\n1\t2\t3\t4\t5\n'
+    # Should pass without error for 5 columns
+    check_dangerous_and_magic_bytes(tsv_bytes, "tsv")
+
+
+def test_csv_embedded_newline_in_quoted_header():
+    """Verify CSV header pre-scan correctly parses header record with embedded newline in quotes."""
+    from src.parsers.sanitization import check_dangerous_and_magic_bytes
+    csv_bytes = b'"col1\nsubheading",col2,"col3\nversion"\n1,2,3\n'
+    check_dangerous_and_magic_bytes(csv_bytes, "csv")
+
+
+def test_csv_bom_prefixed_header_parsed():
+    """Verify CSV header pre-scan correctly handles UTF-8 BOM prefix."""
+    from src.parsers.sanitization import check_dangerous_and_magic_bytes
+    bom_csv = b'\xef\xbb\xbf"col1","col2",col3\n1,2,3\n'
+    check_dangerous_and_magic_bytes(bom_csv, "csv")
+
+
+def test_csv_header_exactly_at_and_above_column_cap():
+    """Verify CSV header exactly at the 10,000 column cap passes, and 10,001 columns raises HTTP 422."""
+    from fastapi import HTTPException
+    from src.parsers.sanitization import check_dangerous_and_magic_bytes
+
+    # Exactly at cap (10,000 columns)
+    at_cap_headers = [f"c{i}" for i in range(10_000)]
+    at_cap_bytes = (",".join(at_cap_headers) + "\n1\n").encode("utf-8")
+    check_dangerous_and_magic_bytes(at_cap_bytes, "csv")
+
+    # One above cap (10,001 columns)
+    above_cap_headers = [f"c{i}" for i in range(10_001)]
+    above_cap_bytes = (",".join(above_cap_headers) + "\n1\n").encode("utf-8")
+    with pytest.raises(HTTPException) as exc_info:
+        check_dangerous_and_magic_bytes(above_cap_bytes, "csv")
+    assert exc_info.value.status_code == 422
+    assert "Table column count exceeds maximum limit" in exc_info.value.detail
+    assert "10,001 columns found" in exc_info.value.detail
+
+
+def test_csv_unterminated_quote_in_header():
+    """Verify unterminated quote in CSV header returns controlled HTTP 422, never 5xx."""
+    from fastapi import HTTPException
+    from src.parsers.sanitization import check_dangerous_and_magic_bytes
+
+    unterminated_csv = b'"col1,col2,col3\n1,2,3\n'
+    with pytest.raises(HTTPException) as exc_info:
+        check_dangerous_and_magic_bytes(unterminated_csv, "csv")
+    assert exc_info.value.status_code == 422
+    assert "Malformed CSV/TSV table header record" in exc_info.value.detail
+
+
+def test_csv_10mb_header_only_hits_single_field_cap():
+    """Verify a 10 MB header-only line hits the single-field cap (HTTP 413) quickly without hanging."""
+    import time
+    from fastapi import HTTPException
+    from src.parsers.sanitization import check_dangerous_and_magic_bytes
+
+    huge_header_line = b"col1," + (b"A" * (10 * 1024 * 1024 + 1024))
+    t0 = time.perf_counter()
+    with pytest.raises(HTTPException) as exc_info:
+        check_dangerous_and_magic_bytes(huge_header_line, "csv")
+    elapsed = time.perf_counter() - t0
+
+    assert exc_info.value.status_code == 413
+    assert "Single field or row length exceeds maximum limit" in exc_info.value.detail
+    assert elapsed < 1.0, f"Single-field cap check took too long: {elapsed:.3f}s"
+
 
