@@ -1085,5 +1085,28 @@ A systematic read-only audit of the 10 chart tokens against the backend response
     - Corrected Phase 4 description across documentation: Phase 4 consists of route shells, column-config bar, API client, wiring to live endpoints, and client-side exports (not "frontend chart expansion", which was already merged in `feat/chart-expansion-10`).
 - **Milestone Status**: Phase 3B is 100% certified and closed. Phase 4 is fully unblocked.
 
-
-
+## Update 2026-10-10 (Phase 3B Closure-Gaps & Input Limits Reconciliation)
+- **Task**: Fix CSV/TSV header guard delimiter counting bug, reconcile pre-parse input limits into a single source of truth, produce empirical evidence for XLSX expansion, and verify security audit report hygiene.
+- **Details**:
+  - **WS-A: CSV/TSV Header Guard Record Parsing**:
+    - Replaced naive delimiter character counting with generator-based header record parsing using standard `csv.reader(..., strict=True)` in [`backend/src/parsers/sanitization.py`](file:///d:/Foresight/backend/src/parsers/sanitization.py). Reads a bounded prefix of chunks (up to 10 MB) without full-file buffering or disk persistence.
+    - Flipped `test_csv_quoted_commas_in_header_not_miscounted` from `xfail` to passing in [`backend/tests/test_sanitization.py`](file:///d:/Foresight/backend/tests/test_sanitization.py).
+    - Added tests for quoted commas (6,000 columns), quoted tabs (TSV), embedded newlines in headers, UTF-8 BOM, exact column boundaries (10,000 passes, 10,001 fails HTTP 422), unterminated quotes (clean HTTP 422, zero 5xx), and 10 MB header-only line (HTTP 413 in < 1 ms without hanging).
+    - Confirmed downstream formula prefix neutralization, duplicate column disambiguation, whitespace handling, and full-width lookalikes remain intact.
+  - **WS-B: Centralized Pre-Parse Limits & Error Formatters**:
+    - Unified all pre-parse limits into [`backend/config/settings.py`](file:///d:/Foresight/backend/config/settings.py) (`UPLOAD_MAX_SIZE_BYTES=50MB`, `MAX_PARQUET_ROWS=1,000,000`, `MAX_XLSX_UNCOMPRESSED_BYTES=100MB`, `MAX_XLSX_SHEETS=50`, `MAX_COLUMNS=10,000`, `MAX_FIELD_LENGTH_BYTES=10MB`, `XLSX_EXPANSION_RATIO_GUARD=100`) along with centralized error formatters.
+    - Refactored [`backend/src/parsers/sanitization.py`](file:///d:/Foresight/backend/src/parsers/sanitization.py) and [`backend/src/parsers/tabular_parser.py`](file:///d:/Foresight/backend/src/parsers/tabular_parser.py) to reference `settings.py`.
+    - Hardened path sanitization: fixed path traversal bug where extensionless paths like `../../../../etc/passwd` leaked `./etc/passwd` by extracting `os.path.basename()` before extension checking.
+    - Added unit suite [`backend/tests/test_preparse_limits_consistency.py`](file:///d:/Foresight/backend/tests/test_preparse_limits_consistency.py) (7 tests) verifying limit consistency, asserting that diverging limits trigger test failures, and checking error privacy (zero echo of paths, content, or filenames).
+  - **WS-C: XLSX Expansion Empirical Evidence**:
+    - Built 100% in-memory multi-sheet XLSX benchmark generator (`io.BytesIO`) in [`backend/scripts/measure_xlsx_expansion.py`](file:///d:/Foresight/backend/scripts/measure_xlsx_expansion.py) and regression tests in [`backend/tests/test_xlsx_expansion_evidence.py`](file:///d:/Foresight/backend/tests/test_xlsx_expansion_evidence.py).
+    - Measured 4 payloads (~5 MB, ~12 MB, ~25 MB, ~50 MB) across 3 consecutive runs against `POST /api/v1/upload` and `POST /api/v1/segmentation`:
+      - ~5 MB XLSX (70.87 MB XML, 14.01x): Accepted (HTTP 200), Wall ~30s, Peak RSS 551–586 MB, Delta +49.1 MB / +84.8 MB, Post-GC 541.8 MB.
+      - ~12 MB XLSX (168.31 MB XML, 14.01x): Rejected pre-parse (HTTP 413) in 0.169s, Peak RSS 589.6 MB, Delta +12.0 MB.
+      - ~25 MB XLSX (348.42 MB XML, 14.02x): Rejected pre-parse (HTTP 413) in 0.243s, Peak RSS 615.3 MB, Delta +24.9 MB.
+      - ~50 MB XLSX (695.36 MB XML, 14.02x): Rejected pre-parse (HTTP 413) in 0.348s, Peak RSS 664.8 MB, Delta +49.6 MB.
+    - Decision D1 (TBD) Recommendation: The 100 MB uncompressed cap strictly rejects 12 MB, 25 MB, and 50 MB, admitting only 5 MB. At 14x ratio, the ceiling is 7.14 MB compressed; at 8.5x (Online Retail), 11.76 MB; at 6x (Wholesale), 16.67 MB. Parsing 70 MB XML already pushes peak memory to 551–586 MB, at the limit of a 512 MB container tier. Keep 100 MB cap for 512 MB tier; increase to 200 MB on 1 GB tier.
+  - **WS-D: Docker Free-Tier Memory Check**: Skipped as Docker is not installed on the host environment.
+  - **WS-E: Security Audit Report Hygiene & Commit Range Analysis**:
+    - Reconciled [`backend/reports/phase3b_security_audit.md`](file:///d:/Foresight/backend/reports/phase3b_security_audit.md): verified observations O-1 to O-4, recorded in-suite benchmarks, aligned 10k fit-cap wording, verified 10,000-point scatter cap history (commit `6420293`), confirmed Phase 4 definition, and documented that commit range `5a9625d..b187360` contained only compiled `.pyc` files ahead of script commit `d8f1db2`.
+    - Verification: Full test suite passes at **425 passed, 0 failed, 0 xfailed, 0 skipped**. Latency suite passes at **11 passed** in isolation.

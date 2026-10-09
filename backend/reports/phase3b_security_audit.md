@@ -16,10 +16,11 @@ This report documents the certified independent security audit, adversarial vuln
 - **Phase 3B Security Suite**: 53 passing empirical adversarial security tests in `backend/tests/test_phase3b_security.py`.
 - **Shared Sanitizer Regression Suite**: 48 passing regression tests in `backend/tests/test_shared_sanitizer_regression.py`.
 - **Resource Bounds Evidence Suite**: 6 passing gatekeeper tests in `backend/tests/test_resource_bounds_evidence.py`.
-- **Fit-Cap & Tier-Aware Budget Suite**: 7 passing tests in `backend/tests/test_fit_cap_and_tiers.py`.
-- **Sanitizer Regression Test with xfail**: 1 expected failure (`test_csv_quoted_commas_in_header_not_miscounted` marked `xfail`) documenting CSV header quote boundary limitation.
-- **Combined Backend Test Suite**: **407 passed, 1 xfailed** (100% green, 0 unexpected failures, 0 skips).
-- **Isolated Latency Suite**: **11 passed** in 50.90s (`pytest -m latency -v`).
+- **Pre-parse Limits Consistency Suite**: 7 passing tests in `backend/tests/test_preparse_limits_consistency.py`.
+- **XLSX Expansion Evidence Suite**: 4 passing tests in `backend/tests/test_xlsx_expansion_evidence.py`.
+- **Sanitizer Regression Test (Former xfail Resolved)**: `test_csv_quoted_commas_in_header_not_miscounted` flipped to passing; added quoted tabs, embedded newlines, BOM, boundary, and unterminated quote tests.
+- **Combined Backend Test Suite**: **425 passed, 0 failed, 0 xfailed, 0 skips** (100% green).
+- **Isolated Latency Suite**: **11 passed** in 46.63s (`pytest -m latency -v`).
 - **Exit Gate Decision**: **PASS (100% compliant, 0 critical/high findings open, all SLAs satisfied)**.
 
 ---
@@ -145,29 +146,80 @@ Side-by-side comparison executed on the **exact same 20,000-row subsample** (`ra
 
 ---
 
-### 3.4. Evaluation of New Input Limits (Item 4 - Report Only)
+### 3.4. Pre-Parse Input Limits Reconciliation & Empirical Evidence (WS-A, WS-B, WS-C)
 
-1. **Excel (.xlsx) Compression Ratio & 100 MB Uncompressed Cap**:
-   - Measured compression ratio on `Wholesale customers data.csv` exported to `.xlsx`: 22.4 KB compressed -> 134.2 KB uncompressed (**6.00x** ratio).
-   - Measured compression ratio on 50,000 rows of `online_retail.csv` exported to `.xlsx`: 2.57 MB compressed -> 22.30 MB uncompressed (**8.67x** ratio).
-   - Extrapolating to 250,000 rows: ~12.8 MB compressed -> ~111.5 MB uncompressed.
-   - Extrapolating to 500,000 rows: ~25.7 MB compressed -> ~223.0 MB uncompressed.
-   - **Conclusion**: A legitimate, benign `.xlsx` workbook under the 50 MB upload limit (e.g. 15–25 MB compressed) **can easily exceed the 100 MB uncompressed cap**. The 100 MB limit will reject legitimate large Excel workbooks and should be recalibrated before production.
-2. **CSV Header Guard Quoted Commas & Newlines**:
-   - Header delimiter scan `header_sample.count(sep) + 1` counts delimiters byte-wise on the first line.
-   - When column names contain quoted commas (e.g. `"LastName, FirstName"`, `"col,1"`), the parser counts commas inside quotation marks.
-   - Empirical test: A valid CSV with 6,000 columns where names have quoted commas counts as 12,000 commas, triggering HTTP 422 falsely.
-   - Quoted newlines in header names (e.g. `"col1\nsubheading"`) cause the sample to be truncated at the internal newline.
-   - Added automated regression test marked `@pytest.mark.xfail(reason="CSV header delimiter pre-scan counts commas inside quoted header names without respecting quote boundaries")` in `backend/tests/test_sanitization.py`.
-3. **User-Facing Error Rejection Text Catalog**:
-   - Parquet Row Count: `HTTP 413`: `"Parquet row count exceeds limit ({num_rows:,} rows, max is 1,000,000)."`
-   - XLSX Uncompressed Size: `HTTP 413`: `"File uncompressed size exceeds limit ({total_uncompressed / (1024 * 1024):.1f} MB uncompressed, max is 100 MB)."`
-   - XLSX Sheet Count: `HTTP 422`: `"Excel workbook sheet count exceeds limit ({sheet_count} sheets found, max is 50)."`
-   - CSV Column Count: `HTTP 422`: `"Table column count exceeds maximum limit ({col_count:,} columns found, max is 10,000)."`
-   - CSV Single-Field Length: `HTTP 413`: `"Single field or row length exceeds maximum limit ({length:,} bytes, max is 10,485,760 bytes)."`
-   - File Upload Size: `HTTP 413`: `"File exceeds the 50MB limit ({file_mb:.2f} MB uploaded, max is 50 MB)."`
-   - Empty Upload: `HTTP 422`: `"Empty file uploaded (0 bytes). Foresight requires valid non-empty files."`
-   - Disallowed Binary Magic Bytes: `HTTP 415`: `"Dangerous binary file detected: Windows Portable Executable (PE / .exe / .dll). File upload aborted (disallowed)."`
+#### 3.4.1. WS-C Empirical XLSX Expansion & Memory Measurement Table
+
+Evaluated on fresh server instances across 3 consecutive runs per payload (zero disk writes, pure `io.BytesIO`):
+
+| Payload Description | Target Endpoint | Compressed Size | Uncompressed XML | Expansion Ratio | HTTP Status | Wall Time (Median / Worst) | Peak RSS (Median / Worst) | Delta RSS (Median / Worst) | Post-GC RSS (Median) | Current 100 MB Cap Verdict |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| **~5 MB XLSX (1 sheet, 240k rows)** | `/api/v1/upload` | 5.06 MB | 70.87 MB | 14.01x | **200** | 30.658s / 30.687s | 551.3 MB / 586.2 MB | +49.1 MB / +84.8 MB | 541.8 MB | **PASS (Accepted)** |
+| **~5 MB XLSX (1 sheet, 240k rows)** | `/api/v1/segmentation` | 5.06 MB | 70.87 MB | 14.01x | **200** | 30.167s / 30.804s | 576.7 MB / 582.9 MB | +12.4 MB / +12.5 MB | 570.5 MB | **PASS (Accepted)** |
+| **~12 MB XLSX (2 sheets, 570k rows)** | `/api/v1/upload` | 12.01 MB | 168.31 MB | 14.01x | **413** | 0.169s / 0.176s | 589.6 MB / 589.6 MB | +12.0 MB / +12.0 MB | 577.6 MB | **REJECTED (HTTP 413)** |
+| **~12 MB XLSX (2 sheets, 570k rows)** | `/api/v1/segmentation` | 12.01 MB | 168.31 MB | 14.01x | **413** | 0.146s / 0.154s | 589.6 MB / 589.6 MB | +12.0 MB / +12.0 MB | 577.6 MB | **REJECTED (HTTP 413)** |
+| **~25 MB XLSX (2 sheets, 1.18M rows)** | `/api/v1/upload` | 24.86 MB | 348.42 MB | 14.02x | **413** | 0.243s / 0.252s | 615.3 MB / 615.3 MB | +24.9 MB / +24.9 MB | 590.4 MB | **REJECTED (HTTP 413)** |
+| **~25 MB XLSX (2 sheets, 1.18M rows)** | `/api/v1/segmentation` | 24.86 MB | 348.42 MB | 14.02x | **413** | 0.183s / 0.185s | 615.3 MB / 615.3 MB | +24.9 MB / +24.9 MB | 590.4 MB | **REJECTED (HTTP 413)** |
+| **~50 MB XLSX (3 sheets, 2.36M rows)** | `/api/v1/upload` | 49.61 MB | 695.36 MB | 14.02x | **413** | 0.348s / 0.350s | 664.8 MB / 664.8 MB | +49.6 MB / +49.6 MB | 615.2 MB | **REJECTED (HTTP 413)** |
+| **~50 MB XLSX (3 sheets, 2.36M rows)** | `/api/v1/segmentation` | 49.61 MB | 695.36 MB | 14.02x | **413** | 0.240s / 0.245s | 664.8 MB / 664.8 MB | +49.6 MB / +49.6 MB | 615.2 MB | **REJECTED (HTTP 413)** |
+
+**Analysis & Decision D1 Recommendation**:
+- **Sizes Rejected**: The current 100 MB uncompressed cap strictly rejects the 12 MB (168 MB uncomp), 25 MB (348 MB uncomp), and 50 MB (695 MB uncomp) payloads, while permitting the 5 MB payload (70.87 MB uncomp).
+- **Implied Compressed Ceilings**:
+  - At ~14.0x ratio (synthetic tabular data): 100 MB uncompressed implies a **7.14 MB compressed ceiling**.
+  - At ~8.5x ratio (Online Retail): 100 MB uncompressed implies an **11.76 MB compressed ceiling**.
+  - At ~6.0x ratio (Wholesale Customers): 100 MB uncompressed implies a **16.67 MB compressed ceiling**.
+- **Memory Footprint at Current Ceiling**: Parsing the accepted 5.06 MB payload (70.87 MB uncompressed XML) pushed peak working set to 551.3 MB (upload) and 576.7 MB (segmentation), with post-GC settling at ~540–570 MB. On a 512 MB memory tier (Render free tier), uncompressed XML $> 70\text{ MB}$ already operates at container memory margins.
+- **Recommendation for Decision D1 (TBD)**:
+  - Keep the **100x ratio guard** (`uncompressed <= compressed * 100`) as a mandatory defense against high-compression XML bombs.
+  - On a strict 512 MB container tier: keep the uncompressed cap at **100 MB**.
+  - On a 1 GB container tier: increase the uncompressed cap to **200 MB** (implying a ~23 MB compressed ceiling at 8.5x ratio, with estimated peak RSS ~700–800 MB).
+  - Per decision rule, D1 is currently TBD and the 100 MB cap is preserved without code alteration.
+
+---
+
+#### 3.4.2. WS-A CSV/TSV Header Guard Resolution
+
+- **Root Cause of Prior Limitation**: Naive byte-counting of delimiters (`header_sample.count(sep) + 1`) counted commas/tabs inside quoted header strings (e.g. `"col,1"` counted as 2 columns), causing valid wide tables with quoted names to falsely trip the column limit (commit `ac1a737`, former `xfail`).
+- **Remediation**: Implemented generator-based header record parsing with Python's standard `csv.reader(..., strict=True)`. Reads a strictly bounded prefix of lines (halting at the end of the header record or at `MAX_FIELD_LENGTH_BYTES = 10MB`), never buffering the full file and never persisting to disk.
+- **Verification Sweep**:
+  1. Quoted commas: 6,000 columns with quoted names parse cleanly (former `xfail` flipped to passing).
+  2. Quoted tabs: TSV headers with quoted tabs parse accurately.
+  3. Embedded newlines: Quoted multi-line header fields (`"col1\nsubheading"`) parsed without corruption.
+  4. UTF-8 BOM: Leading `\xef\xbb\xbf` stripped seamlessly before parsing.
+  5. Exact boundary: Header at exactly 10,000 columns passes; header at 10,001 columns raises HTTP 422.
+  6. Unterminated quotes: Raises controlled HTTP 422 (`Malformed CSV/TSV table header record: unexpected end of data`), never 5xx.
+  7. 10 MB header-only line: Triggers single-field HTTP 413 in $< 1\text{ ms}$, without hanging.
+  8. Sanitization invariant: Downstream formula prefix neutralization, duplicate disambiguation, whitespace handling, and full-width lookalikes remain 100% active and passing.
+
+---
+
+#### 3.4.3. WS-B Centralized Pre-Parse Limits & Error Catalog
+
+All pre-parse limits and error formatters are unified in `backend/config/settings.py` as the single source of truth:
+
+| Limit Identifier | Constant Name (`settings.py`) | Value | Enforced HTTP Status | Exact Error Text Template | Enforcing Endpoints |
+| :--- | :--- | :---: | :---: | :--- | :--- |
+| **Max Upload Size** | `UPLOAD_MAX_SIZE_BYTES` | 50 MB (`52,428,800`) | **HTTP 413** | `"File exceeds the 50MB limit ({file_mb:.2f} MB uploaded, max is 50 MB)."` | `/upload`, `/forecast`, `/hypotheses`, `/segmentation` |
+| **Empty Upload** | N/A (`len == 0`) | 0 bytes | **HTTP 422** | `"Empty file uploaded (0 bytes). Foresight requires valid non-empty files."` | `/upload`, `/forecast`, `/hypotheses`, `/segmentation` |
+| **Parquet Max Rows** | `MAX_PARQUET_ROWS` | 1,000,000 rows | **HTTP 413** | `"Parquet row count exceeds limit ({num_rows:,} rows, max is 1,000,000)."` | `/upload`, `/forecast`, `/hypotheses`, `/segmentation` |
+| **XLSX Uncompressed XML** | `MAX_XLSX_UNCOMPRESSED_BYTES` | 100 MB (`104,857,600`) | **HTTP 413** | `"File uncompressed size exceeds limit ({total_uncompressed_mb:.1f} MB uncompressed, max is 100 MB)."` | `/upload`, `/forecast`, `/hypotheses`, `/segmentation` |
+| **XLSX Sheet Count** | `MAX_XLSX_SHEETS` | 50 sheets | **HTTP 422** | `"Excel workbook sheet count exceeds limit ({sheet_count} sheets found, max is 50)."` | `/upload`, `/forecast`, `/hypotheses`, `/segmentation` |
+| **Table Column Count** | `MAX_COLUMNS` | 10,000 columns | **HTTP 422** | `"Table column count exceeds maximum limit ({col_count:,} columns found, max is 10,000)."` | `/upload`, `/forecast`, `/hypotheses`, `/segmentation` |
+| **Single-Field / Row Length** | `MAX_FIELD_LENGTH_BYTES` | 10 MB (`10,485,760`) | **HTTP 413** | `"Single field or row length exceeds maximum limit ({length:,} bytes, max is 10,485,760 bytes)."` | `/upload`, `/forecast`, `/hypotheses`, `/segmentation` |
+| **XLSX Ratio Guard** | `XLSX_EXPANSION_RATIO_GUARD` | 100x ratio | **HTTP 413** | Rejects archives where uncompressed size exceeds 100x compressed size | Pre-parse gatekeeper |
+
+- **Discrepancy Reconciliation (Decision D2)**: An earlier discussion draft noted a discrepancy between "500-column header guard vs 10,000 error catalog". In the actual codebase, `sanitization.py` has consistently enforced `MAX_COLUMNS = 10,000` (introduced in commit `103e6e6`). Decision D2 is marked TBD; the 10,000 limit is preserved.
+- **Path Sanitization Hardening**: Discovered that filenames with path traversal prefixes lacking extensions (e.g. `../../../../etc/passwd`) split on the dot in `..` and echoed `./etc/passwd` in extension error messages. Remediated by extracting `os.path.basename()` before extension parsing, guaranteeing zero path leakage across all error responses.
+- **Consistency Verification**: `backend/tests/test_preparse_limits_consistency.py` verifies that all code paths reference `settings.py` and actively fails if any code path diverges.
+
+---
+
+#### 3.4.4. Explanation of Commit Range `5a9625d..b187360`
+
+Execution of `git log 5a9625d..b187360 --oneline` shows a single commit:
+- `b187360 feat: add Phase 3B re-benchmark harness script for isolated performance testing`
+- **Contents & Analysis**: While the commit message stated "add Phase 3B re-benchmark harness script", inspection of `git show b187360 --stat` confirms that this commit only added compiled Python bytecode cache files (`.pyc` files in `backend/tests/__pycache__/` for `test_fit_cap_and_tiers`, `test_resource_bounds_evidence`, and `test_shared_sanitizer_regression`). The actual Python script `rebenchmark_phase3b.py` was committed shortly thereafter in commit `d8f1db2`.
 
 ---
 
@@ -214,11 +266,14 @@ Evaluated across all 9 benchmark suites under `threadpoolctl.threadpool_limits(l
   3. `python -m pytest backend/tests/test_resource_bounds_evidence.py -v` (6 passing)
   4. `python -m pytest backend/tests/test_fit_cap_and_tiers.py -v` (7 passing)
   5. `python -m pytest backend/tests/ -m latency -v` (11 passing)
-  6. `python -m pytest backend/tests/ -m "not latency" -q` (396 passing, 1 xfailed)
-  7. `python -m pytest backend/tests/ -q` (407 passing, 1 xfailed)
-  8. `python backend/scripts/measure_resource_bounds.py` (evaluated across 5 hostile vectors)
-  9. `python backend/scripts/rebenchmark_phase3b.py` (evaluated across 9 benchmark suites)
-  10. `python backend/scripts/audit_artifact_size.py --ceiling-mb 50.0` (2.53 MB total across 10 artifacts, 5.1% utilization)
+  6. `python -m pytest backend/tests/ -m "not latency" -q` (414 passing, 0 xfailed, 0 skips)
+  7. `python -m pytest backend/tests/ -q` (425 passing, 0 xfailed, 0 skips)
+  8. `python -m pytest backend/tests/test_preparse_limits_consistency.py -v` (7 passing)
+  9. `python -m pytest backend/tests/test_xlsx_expansion_evidence.py -v` (4 passing)
+  10. `python backend/scripts/measure_xlsx_expansion.py` (evaluated across 4 payloads $\times$ 2 endpoints)
+  11. `python backend/scripts/measure_resource_bounds.py` (evaluated across 5 hostile vectors)
+  12. `python backend/scripts/rebenchmark_phase3b.py` (evaluated across 9 benchmark suites)
+  13. `python backend/scripts/audit_artifact_size.py --ceiling-mb 50.0` (2.53 MB total across 10 artifacts, 5.1% utilization)
 
 ---
 
