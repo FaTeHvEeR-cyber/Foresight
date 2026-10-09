@@ -260,3 +260,21 @@ def test_sanitize_tabular_cells_categorical_series():
     assert clean_df["cat"].iloc[0] == "'=formula_cat"
     assert clean_df["cat"].iloc[1] == "normal_cat"
     assert clean_df["cat"].iloc[2] == "'=formula_cat"
+
+
+@pytest.mark.xfail(
+    reason="CSV header delimiter pre-scan counts commas inside quoted header names without respecting quote boundaries, falsely rejecting valid wide tables"
+)
+def test_csv_quoted_commas_in_header_not_miscounted():
+    """Verify CSV header pre-scan with quoted commas does not falsely exceed column limit."""
+    # 6,000 columns with quoted commas (e.g. "col,1", "col,2", ...).
+    # Actual column count is 6,000 (within 10,000 column limit).
+    # But naive byte count of comma finds 11,999 commas, falsely triggering HTTP 422.
+    headers = [f'"col,{i}"' for i in range(6000)]
+    row = ["1"] * 6000
+    csv_bytes = (",".join(headers) + "\n" + ",".join(row) + "\n").encode("utf-8")
+
+    from src.parsers.sanitization import check_dangerous_and_magic_bytes
+    # Should not raise HTTPException(422) if quoted commas were respected
+    check_dangerous_and_magic_bytes(csv_bytes, "csv")
+
