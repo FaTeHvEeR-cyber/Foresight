@@ -14,6 +14,11 @@ import pandas as pd
 
 from src.models import ColumnNullMetric, RawNullProfile
 
+try:
+    from config.settings import settings
+except ImportError:
+    from app.config import settings
+
 
 InferredType = Literal["numeric", "categorical", "datetime", "text", "boolean"]
 
@@ -114,14 +119,14 @@ def parse_tabular(file_bytes: bytes, extension: str) -> pd.DataFrame:
     # Downcast numeric columns on ingestion to cut memory footprint (spec §5.2)
     df = downcast_numeric_columns(df)
 
-    # Cell size guardrail: reject individual fields exceeding 10 MB
+    # Cell size guardrail: reject individual fields exceeding MAX_FIELD_LENGTH_BYTES
     for col in df.select_dtypes(include=["object", "string"]).columns:
         s = df[col].dropna().astype(str)
         if not s.empty:
             max_cell_len = int(s.map(len).max())
-            if max_cell_len > 10 * 1024 * 1024:
+            if max_cell_len > settings.MAX_FIELD_LENGTH_BYTES:
                 raise ValueError(
-                    f"Single field length exceeds maximum limit ({max_cell_len:,} characters in column '{col}', max is 10,485,760)."
+                    f"Single field length exceeds maximum limit ({max_cell_len:,} characters, max is {settings.MAX_FIELD_LENGTH_BYTES:,})."
                 )
 
     return df

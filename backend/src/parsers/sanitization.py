@@ -400,10 +400,10 @@ def check_dangerous_and_magic_bytes(content: bytes, ext: str) -> None:
             import pyarrow.parquet as pq
             pf = pq.ParquetFile(io.BytesIO(content))
             num_rows = pf.metadata.num_rows
-            if num_rows > 1_000_000:
+            if num_rows > settings.MAX_PARQUET_ROWS:
                 raise HTTPException(
                     status_code=413,
-                    detail=f"Parquet row count exceeds limit ({num_rows:,} rows, max is 1,000,000).",
+                    detail=settings.error_parquet_rows_exceeded(num_rows),
                 )
         except HTTPException:
             raise
@@ -422,15 +422,15 @@ def check_dangerous_and_magic_bytes(content: bytes, ext: str) -> None:
             with zipfile.ZipFile(io.BytesIO(content)) as z:
                 total_uncompressed = sum(info.file_size for info in z.infolist())
                 sheet_count = len([info for info in z.infolist() if info.filename.startswith("xl/worksheets/sheet")])
-                if total_uncompressed > 100 * 1024 * 1024:
+                if total_uncompressed > settings.MAX_XLSX_UNCOMPRESSED_BYTES:
                     raise HTTPException(
                         status_code=413,
-                        detail=f"File uncompressed size exceeds limit ({total_uncompressed / (1024 * 1024):.1f} MB uncompressed, max is 100 MB).",
+                        detail=settings.error_xlsx_uncompressed_exceeded(total_uncompressed),
                     )
-                if sheet_count > 50:
+                if sheet_count > settings.MAX_XLSX_SHEETS:
                     raise HTTPException(
                         status_code=422,
-                        detail=f"Excel workbook sheet count exceeds limit ({sheet_count} sheets found, max is 50).",
+                        detail=settings.error_xlsx_sheets_exceeded(sheet_count),
                     )
         except HTTPException:
             raise
@@ -452,7 +452,7 @@ def check_dangerous_and_magic_bytes(content: bytes, ext: str) -> None:
                 detail="Contains null byte binary data: Binary or malformed content detected (disallowed).",
             )
         # Single field or row length pre-parse guard (10 MB maximum limit)
-        max_field_bytes = 10 * 1024 * 1024
+        max_field_bytes = settings.MAX_FIELD_LENGTH_BYTES
         if len(content) > max_field_bytes:
             pos = 0
             n = len(content)
@@ -462,13 +462,13 @@ def check_dangerous_and_magic_bytes(content: bytes, ext: str) -> None:
                     if n - pos > max_field_bytes:
                         raise HTTPException(
                             status_code=413,
-                            detail=f"Single field or row length exceeds maximum limit ({n - pos:,} bytes, max is {max_field_bytes:,} bytes).",
+                            detail=settings.error_single_field_length_exceeded(n - pos),
                         )
                     break
                 if next_nl - pos > max_field_bytes:
                     raise HTTPException(
                         status_code=413,
-                        detail=f"Single field or row length exceeds maximum limit ({next_nl - pos:,} bytes, max is {max_field_bytes:,} bytes).",
+                        detail=settings.error_single_field_length_exceeded(next_nl - pos),
                     )
                 pos = next_nl + 1
 
@@ -492,7 +492,7 @@ def check_dangerous_and_magic_bytes(content: bytes, ext: str) -> None:
                 if consumed > max_field_bytes:
                     raise HTTPException(
                         status_code=413,
-                        detail=f"Single field or row length exceeds maximum limit ({consumed:,} bytes, max is {max_field_bytes:,} bytes).",
+                        detail=settings.error_single_field_length_exceeded(consumed),
                     )
                 yield chunk.decode("utf-8", errors="replace")
 
@@ -512,7 +512,7 @@ def check_dangerous_and_magic_bytes(content: bytes, ext: str) -> None:
             if "field larger than field limit" in err_msg:
                 raise HTTPException(
                     status_code=413,
-                    detail=f"Single field or row length exceeds maximum limit ({max_field_bytes:,} bytes limit exceeded).",
+                    detail=settings.error_single_field_length_exceeded(max_field_bytes),
                 )
             raise HTTPException(
                 status_code=422,
@@ -520,10 +520,10 @@ def check_dangerous_and_magic_bytes(content: bytes, ext: str) -> None:
             )
 
         col_count = len(header)
-        if col_count > 10_000:
+        if col_count > settings.MAX_COLUMNS:
             raise HTTPException(
                 status_code=422,
-                detail=f"Table column count exceeds maximum limit ({col_count:,} columns found, max is 10,000).",
+                detail=settings.error_max_columns_exceeded(col_count),
             )
 
 
@@ -544,21 +544,19 @@ def gatekeep_tabular_upload(
         str: Normalized lowercase file extension.
     """
     upload_limit: int = (
-        max_bytes if max_bytes is not None else int(getattr(settings, "max_upload_bytes", 50 * 1024 * 1024))
+        max_bytes if max_bytes is not None else settings.UPLOAD_MAX_SIZE_BYTES
     )
 
     # 1. Size guardrail: 50MB HTTP 413 (and 0-byte HTTP 422)
     if len(content) > upload_limit:
-        max_mb = upload_limit // (1024 * 1024)
-        file_mb = len(content) / (1024 * 1024)
         raise HTTPException(
             status_code=413,
-            detail=f"File exceeds the {max_mb}MB limit ({file_mb:.2f} MB uploaded, max is {max_mb} MB).",
+            detail=settings.error_upload_size_exceeded(len(content)),
         )
     if len(content) == 0:
         raise HTTPException(
             status_code=422,
-            detail="Empty file uploaded (0 bytes). Foresight requires valid non-empty files.",
+            detail=settings.error_empty_file(),
         )
 
     # 2. Extension validation
@@ -568,14 +566,14 @@ def gatekeep_tabular_upload(
             status_code=415,
             detail="Filename contains null byte characters (disallowed).",
         )
-    if not clean_filename or "." not in clean_filename:
-        safe_name = os.path.basename(clean_filename.replace("\\", "/"))
+    safe_name = os.path.basename(clean_filename.replace("\\", "/"))
+    if not safe_name or "." not in safe_name:
         raise HTTPException(
             status_code=415,
             detail=f"Unsupported file format: File '{safe_name}' has no valid extension. Foresight requires a valid extension (disallowed).",
         )
 
-    ext = clean_filename.rsplit(".", 1)[-1].strip().lower()
+    ext = safe_name.rsplit(".", 1)[-1].strip().lower()
     if ext not in TABULAR_ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=415,

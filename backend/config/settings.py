@@ -23,6 +23,37 @@ class Settings(BaseSettings):
     MAX_FILE_SIZE_MB: int = 50
     UPLOAD_MAX_SIZE_BYTES: int = 50 * 1024 * 1024
 
+    # Pre-parse Resource Limits & Guardrails (Phase 3B - Single Source of Truth)
+    MAX_PARQUET_ROWS: int = 1_000_000
+    MAX_XLSX_UNCOMPRESSED_BYTES: int = 100 * 1024 * 1024
+    MAX_XLSX_SHEETS: int = 50
+    MAX_COLUMNS: int = 10_000
+    MAX_FIELD_LENGTH_BYTES: int = 10 * 1024 * 1024
+    XLSX_EXPANSION_RATIO_GUARD: int = 100
+
+    def error_upload_size_exceeded(self, uploaded_bytes: int) -> str:
+        max_mb = self.UPLOAD_MAX_SIZE_BYTES // (1024 * 1024)
+        file_mb = uploaded_bytes / (1024 * 1024)
+        return f"File exceeds the {max_mb}MB limit ({file_mb:.2f} MB uploaded, max is {max_mb} MB)."
+
+    def error_empty_file(self) -> str:
+        return "Empty file uploaded (0 bytes). Foresight requires valid non-empty files."
+
+    def error_parquet_rows_exceeded(self, num_rows: int) -> str:
+        return f"Parquet row count exceeds limit ({num_rows:,} rows, max is {self.MAX_PARQUET_ROWS:,})."
+
+    def error_xlsx_uncompressed_exceeded(self, uncompressed_bytes: int) -> str:
+        return f"File uncompressed size exceeds limit ({uncompressed_bytes / (1024 * 1024):.1f} MB uncompressed, max is {self.MAX_XLSX_UNCOMPRESSED_BYTES // (1024 * 1024)} MB)."
+
+    def error_xlsx_sheets_exceeded(self, sheet_count: int) -> str:
+        return f"Excel workbook sheet count exceeds limit ({sheet_count} sheets found, max is {self.MAX_XLSX_SHEETS})."
+
+    def error_max_columns_exceeded(self, col_count: int) -> str:
+        return f"Table column count exceeds maximum limit ({col_count:,} columns found, max is {self.MAX_COLUMNS:,})."
+
+    def error_single_field_length_exceeded(self, length: int) -> str:
+        return f"Single field or row length exceeds maximum limit ({length:,} bytes, max is {self.MAX_FIELD_LENGTH_BYTES:,} bytes)."
+
     # File format categories
     TABULAR_EXTENSIONS: Set[str] = {"csv", "tsv", "xlsx", "xls", "parquet"}
     DOCUMENT_EXTENSIONS: Set[str] = {"pdf", "docx", "txt", "md"}
@@ -116,3 +147,14 @@ settings = Settings()
 def get_settings() -> Settings:
     """Return application settings singleton or instance for dependency injection."""
     return settings
+
+
+# Module-level named constants for pre-parse limits
+MAX_UPLOAD_SIZE_BYTES: int = settings.UPLOAD_MAX_SIZE_BYTES
+MAX_PARQUET_ROWS: int = settings.MAX_PARQUET_ROWS
+MAX_XLSX_UNCOMPRESSED_BYTES: int = settings.MAX_XLSX_UNCOMPRESSED_BYTES
+MAX_XLSX_SHEETS: int = settings.MAX_XLSX_SHEETS
+MAX_COLUMNS: int = settings.MAX_COLUMNS
+MAX_FIELD_LENGTH_BYTES: int = settings.MAX_FIELD_LENGTH_BYTES
+XLSX_EXPANSION_RATIO_GUARD: int = settings.XLSX_EXPANSION_RATIO_GUARD
+
