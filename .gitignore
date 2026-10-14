@@ -4,6 +4,18 @@ node_modules/
 /.pnp
 .pnp.js
 
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+
 # Testing
 /coverage
 
@@ -27,8 +39,10 @@ yarn-debug.log*
 yarn-error.log*
 
 # Local env files
-.env*.local
 .env
+.env.*
+.env*.local
 
 # Vercel
 .vercel
+

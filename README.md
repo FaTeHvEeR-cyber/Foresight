@@ -1110,3 +1110,12 @@ A systematic read-only audit of the 10 chart tokens against the backend response
   - **WS-E: Security Audit Report Hygiene & Commit Range Analysis**:
     - Reconciled [`backend/reports/phase3b_security_audit.md`](file:///d:/Foresight/backend/reports/phase3b_security_audit.md): verified observations O-1 to O-4, recorded in-suite benchmarks, aligned 10k fit-cap wording, verified 10,000-point scatter cap history (commit `6420293`), confirmed Phase 4 definition, and documented that commit range `5a9625d..b187360` contained only compiled `.pyc` files ahead of script commit `d8f1db2`.
     - Verification: Full test suite passes at **425 passed, 0 failed, 0 xfailed, 0 skipped**. Latency suite passes at **11 passed** in isolation.
+
+## Update 2026-10-14 (Repo Hygiene: Untrack Bytecode Caches & Configure .gitignore)
+- **Task**: Untrack compiled Python bytecode caches (`.pyc`), extend root `.gitignore`, and verify repo hygiene.
+- **Details**:
+  - **Tracked Cache Inventory & Untracking**: Identified 94 tracked `.pyc` files across `backend/`, `backend/app/`, `backend/scripts/`, `backend/src/`, and `backend/tests/`. Safely untracked them from git index without deleting local files (`git rm --cached`).
+  - **Gitignore Extension**: Updated root `.gitignore` with Python bytecode patterns (`__pycache__/`, `*.py[cod]`, `*$py.class`), test caches (`.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`), virtual environments (`.venv/`, `venv/`), and environment files (`.env`, `.env.*`).
+  - **Security & Secret Audit**: Confirmed zero secrets (`.env`, `.pem`, `.key`) or unvalidated large data files are tracked in git. Model artifact footprint confirmed at 2.53 MB (well within 50.0 MB spec §5.2).
+  - **Verification**: Verified frontend test suite passing (76 passed across 3 suites) and backend test suite execution.
+
