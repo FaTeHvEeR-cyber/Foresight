@@ -35,7 +35,8 @@ def main():
     print("=" * 70)
 
     # 1. Blobs (600 rows)
-    X, _ = make_blobs(n_samples=600, n_features=4, centers=3, cluster_std=0.5, center_box=(-20.0, 20.0), random_state=42)
+    blobs_res = make_blobs(n_samples=600, n_features=4, centers=3, cluster_std=0.5, center_box=(-20.0, 20.0), random_state=42)
+    X = blobs_res[0]
     df_blob = pd.DataFrame(X, columns=[f"feat_{i}" for i in range(4)])
     res_b = run_segmentation(df_blob, random_state=42)
     print(f"Synthetic 3-Blobs: K* = {res_b['optimal_k']} via '{res_b['clustering_method']}'")
@@ -81,7 +82,13 @@ def main():
         fit_idx = rng_cap.choice(20000, size=10000, replace=False)
         fit_idx.sort()
 
-        ifo_10k = IsolationForest(n_estimators=10, max_samples=min(256, 10000), contamination=0.03, random_state=42, n_jobs=1)
+        ifo_10k = IsolationForest(
+            n_estimators=10,
+            max_samples=min(256, 10000),  # pyright: ignore[reportArgumentType]
+            contamination=0.03,  # pyright: ignore[reportArgumentType]
+            random_state=42,
+            n_jobs=1,
+        )
         ifo_10k.fit(Xs_sub[fit_idx])
         scores_10k = -ifo_10k.score_samples(Xs_sub)
 
