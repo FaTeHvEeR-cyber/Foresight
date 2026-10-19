@@ -4,7 +4,8 @@ import io
 import pytest
 from starlette.testclient import TestClient
 
-from main import app, DATA_STORE
+from main import app
+import main
 
 
 @pytest.fixture
@@ -45,23 +46,9 @@ def test_upload_tabular_csv_success(client):
     assert raw_profile["score"]["nullPercentage"] == 40.0
     assert raw_profile["name"]["nullCount"] == 0
 
-    # 3. Check DATA_STORE stores raw profile and imputed modeling data separately
+    # 3. Assert zero retention: no DATA_STORE exists, opaque fileId has nothing stored behind it
     file_id = data["fileId"]
-    assert file_id in DATA_STORE
-    stored = DATA_STORE[file_id]
-
-    raw_df = stored["raw_dataframe"]
-    imputed_df = stored["imputed_modeling_data"]
-
-    # Raw DataFrame has NaNs and sanitized formula injection prefixes
-    assert raw_df["score"].isna().sum() == 2
-    # Check formula prefixes neutralized with single quote prefix
-    assert raw_df["formula_col"].iloc[0].startswith("'=")
-    assert raw_df["formula_col"].iloc[1].startswith("'@")
-
-    # Imputed DataFrame has 0 NaNs in numeric columns and was-missing indicator
-    assert imputed_df["score"].isna().sum() == 0
-    assert "score_was_missing" in imputed_df.columns
+    assert not hasattr(main, "DATA_STORE"), "DATA_STORE must not exist on canonical app (zero-retention Spec §1.1)"
 
 
 def test_upload_document_pdf_success(client, sample_pdf_bytes):
