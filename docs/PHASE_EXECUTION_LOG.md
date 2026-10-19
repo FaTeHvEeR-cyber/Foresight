@@ -256,3 +256,29 @@ Agent Split:
   - Evaluated new input limits (report only): documented Excel 100 MB uncompressed cap expansion risks (6x–8.7x compression ratio) and CSV quoted comma pre-scan behavior with `xfail` regression test.
 - **Unblocking Status**: Phase 3B certified and closed. Phase 4 (route shells, column-config bar, API client, wiring to live endpoints, and client-side exports) is fully unblocked for full-stack integration.
 
+---
+
+## 11. Phase 3B Zero-Retention Hardening & Cross-Request State Sweep
+
+- **Environment**: OS = Windows 11 Home (win32, x64), Python = 3.14.3.
+- **Milestone**: Complete zero-retention hardening on upload path (`backend/main.py`), untrack `.agents/` workspace files, invert legacy tests, add zero-retention verification suite, and perform cross-request state sweep.
+- **Findings Remediated**:
+  - **F-07 (`DATA_STORE` Process-Level Retention)**:
+    - `backend/main.py` previously retained raw DataFrames, imputed DataFrames, profiles, and text in module-level `DATA_STORE` without eviction.
+    - Completely removed `DATA_STORE` and writes. Wrapped requests in `ephemeral_processing()` with explicit `del` and `gc.collect()` in `finally:` blocks.
+    - Preserved `UploadResponse` contract (`fileId` returned as opaque identifier with 0 persistent state behind it).
+  - **Pre-Fix vs Post-Fix Evidence (30 Uploads of ~4.89 MB CSV, In-Memory Only)**:
+    - *Pre-Fix*: RSS grew from 339.33 MB to 445.76 MB (+106.43 MB). Live DataFrames leaked from 3 to 63 (+60 DataFrames, 2 per upload). Retained post-GC: 63 DataFrames, 31 `DATA_STORE` keys, 441.84 MB.
+    - *Post-Fix*: RSS plateaued from 339.50 MB to 362.78 MB (+23.28 MB allocator buffer). Live DataFrames strictly flat at 1 (0 leaked). Post-GC: 1 live DataFrame, 0 `DATA_STORE` keys, 357.89 MB (+18.39 MB bounded overhead).
+  - **Test Inversion & New Zero-Retention Suite**:
+    - Inverted legacy retention assertions in `test_upload_endpoint.py` and `test_phase2_exit_criteria.py` to assert `assert not hasattr(main, "DATA_STORE")`.
+    - Added [`backend/tests/test_zero_retention.py`](file:///d:/Foresight/backend/tests/test_zero_retention.py) (4 tests) covering `/api/v1/upload` (CSVs, XLSX, text documents), `/api/v1/forecast`, `/api/v1/hypotheses`, and `/api/v1/segmentation` with bounded live DataFrame assertions.
+  - **Decisions Implemented**:
+    - **D1 (Session Store & Ingestion Router)**: Verified that `backend/app/main.py` is the Phase 2 entrypoint, while Decision D3 ("Retire `backend/app/main.py` and repoint `conftest.py` plus 8 test files to `main`") is DEFERRED to Phase 4. Removing `ingestion.router` would break 20 upload tests across 4 active files hitting `conftest.client`. In accordance with WS-C guardrail ("stop and report instead of rewriting it"), WS-C was stopped and reported for Phase 4 unification.
+    - **D2 (Untrack `.agents/`)**: Confirmed 0 secrets/keys in `.agents/`, 11 files with Windows home paths, and 56 files with repo paths. Executed `git rm -r --cached .agents` (99 files untracked from git index, local files preserved) and added `.agents/` to root `.gitignore`.
+  - **Cross-Request State Sweep**: Swept `backend/main.py` and `backend/src/` for caches, registries, and singletons. Confirmed zero other module-level structures retain user data.
+- **Commits**:
+  - `b3c8181`: `fix(upload): stop retaining parsed uploads in DATA_STORE (zero-retention)`
+  - `2dbf1e0`: `chore(repo): untrack agent workspace files`
+
+

@@ -280,3 +280,65 @@ Evaluated across all 9 benchmark suites under `threadpoolctl.threadpool_limits(l
 ## 5. Phase 4 Unblocking Status
 
 Phase 3B Follow-up Hardening, Fit-Cap, and Closure Gaps are **100% closed and verified**. Phase 4 (route shells, column-config bar, API client, wiring to live endpoints, and client-side exports) is fully unblocked for full-stack integration.
+
+---
+
+## 6. Addendum: Retention on the Upload Path (Zero-Retention Fix & Sweep)
+
+### 6.1. Finding Summary & Classification
+
+- **Finding ID**: **F-07**
+- **Severity**: **HIGH** (Incomplete Cleanup / Cross-Request State Retention / Memory Exhaustion)
+- **Vector**: **Vector 1: Ephemeral RAM Lifecycle & Zero-Disk-Persistence**
+- **Affected Endpoints**: `POST /upload`, `POST /api/upload`, `POST /api/v1/upload` in canonical application (`backend/main.py`)
+- **Root Cause**:
+  `backend/main.py` declared a module-level dictionary `DATA_STORE = {}`. On every accepted upload, the endpoint stored the dataset into `DATA_STORE[file_id] = {...}`, retaining raw `pandas.DataFrame`, median-imputed modeling `pandas.DataFrame`, raw null profile dicts, and parsed document text. No production code ever read, queried, or evicted `DATA_STORE`; only two legacy tests (`test_upload_endpoint.py` and `test_phase2_exit_criteria.py`) asserted its presence. Consequently, every accepted upload survived the request lifecycle and persisted in process RAM indefinitely until server restart, directly violating Master Spec §1.1 (zero-persistence, stateless in-memory processing).
+- **Audit Verdict Status**:
+  The Phase 2 Ingress security verdict was incomplete regarding cross-request process-level state retention. This finding formally **reopens and definitively closes** the Phase 2 Ingress verdict with zero-retention verification.
+
+### 6.2. Why Earlier Audits Missed It
+
+1. **Focus on Inference Endpoints**: Earlier Phase 3B audits focused strictly on the newly introduced analytics endpoints (`POST /api/v1/segmentation`, `/forecast`, `/hypotheses`), which were built stateless from the beginning and verified for zero disk writes and ephemeral RAM cleanup.
+2. **Sanitizer vs Retention Scope**: The Phase 3B hostile-file sanitizer sweep exercised `/upload` for MIME/magic-byte validation, format boundary handling, and CWE-1236 formula neutralization, but tested requests individually without auditing process memory accumulation or inspecting module-level dictionaries across successive requests.
+3. **Superseded Test Assertions**: The legacy tests from Phase 2 actively encoded the superseded cache design by asserting `assert file_id in DATA_STORE`, masking the vulnerability as expected behavior.
+
+### 6.3. Empirical Evidence & Resource Benchmarks
+
+Evaluated on **Windows 11 Home (win32, x64)** with **Python 3.14.3** using a workload of 30 consecutive uploads of a ~4.89 MB CSV (24,000 rows $\times$ 25 columns, zero disk persistence, in-memory `io.BytesIO` buffers):
+
+| Measurement Point | Pre-Fix Working Set (RSS) | Pre-Fix Live DataFrames | Pre-Fix `DATA_STORE` Keys | Post-Fix Working Set (RSS) | Post-Fix Live DataFrames | Post-Fix `DATA_STORE` Keys | Verdict |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **0 Uploads (Baseline)** | 339.33 MB | 3 | 1 | 339.50 MB | 1 | 0 | Baseline established |
+| **10 Uploads** | 389.20 MB (+49.87 MB) | 23 (+20) | 11 (+10) | 358.59 MB (+19.09 MB) | 1 (+0) | 0 | Leaked vs Flat |
+| **20 Uploads** | 416.56 MB (+77.23 MB) | 43 (+40) | 21 (+20) | 363.33 MB (+23.83 MB) | 1 (+0) | 0 | Leaked vs Flat |
+| **30 Uploads** | 445.76 MB (+106.43 MB) | 63 (+60) | 31 (+30) | 362.78 MB (+23.28 MB) | 1 (+0) | 0 | Leaked vs Flat |
+| **Post-`gc.collect()`** | 441.84 MB (+102.51 MB) | **63 (leaked)** | **31 (retained)** | 357.89 MB (+18.39 MB) | **1 (0 leaked)** | **0 (eliminated)** | **FIX VERIFIED** |
+
+- **Pre-Fix Behavior**: Exactly 2 `DataFrame` objects (raw and imputed) and 1 profile/doc dictionary were retained per upload. After 30 uploads, process RSS grew by +106.43 MB with 63 uncollected DataFrames in memory.
+- **Post-Fix Behavior**: Live DataFrames remained strictly constant at 1 throughout all 30 uploads (0 leaked DataFrames). RSS plateaued at ~362 MB and dropped to 357.89 MB post-GC (+18.39 MB total one-time allocator overhead, completely bounded).
+
+### 6.4. Remediation & Implementation Details
+
+1. **Elimination of `DATA_STORE`**: Removed the `DATA_STORE` dictionary entirely from `backend/main.py`. Removed dead code executing `impute_for_modeling` on the upload path (modeling imputation belongs exclusively in downstream modeling engines).
+2. **Guaranteed Ephemeral Dereferencing**: Wrapped all upload processing inside `ephemeral_processing()` with an explicit `finally:` block that executes `del raw_df, sanitized_df, raw_null_profile_list, doc_result, doc_text, file_bytes, file_io, raw_contents` followed immediately by `gc.collect()`, executing on both success and error (4xx/500) paths.
+3. **Contract Preservation**: Preserved the `UploadResponse` contract (`fileId`, `fileName`, `rowCount`, `columnCount`, `columns`, `rawNullProfile`, `memoryUsageBytes`). The `fileId` is returned as an opaque identifier with zero persisted state behind it.
+4. **Test Inversion**: Inverted the two superseded retention tests (`test_upload_endpoint.py` and `test_phase2_exit_criteria.py`) to assert `assert not hasattr(main, "DATA_STORE")`. Validated algorithmic divergence of raw null profiles vs median imputation in standalone pipelines.
+5. **Zero-Retention Test Suite**: Added `backend/tests/test_zero_retention.py` with 4 comprehensive test cases verifying that `/api/v1/upload` (CSVs, XLSX, text documents), `/api/v1/forecast`, `/api/v1/hypotheses`, and `/api/v1/segmentation` retain zero DataFrames and zero module-level container growth across multiple requests.
+
+### 6.5. Cross-Request State Sweep
+
+A systematic audit was conducted across all module-level scopes in `backend/main.py` and `backend/src/` for state retention, caches, registries, and singletons:
+
+| File / Component | Scoped Structure | Type | Holds User Data? | Eviction Policy / Lifetime | Risk Assessment & Verdict |
+| :--- | :--- | :---: | :---: | :---: | :--- |
+| `backend/main.py` | `DATA_STORE` | `dict` | **YES** (DataFrames, profiles, text) | None (unbounded leak) | **HIGH RISK — ELIMINATED** (Zero retention restored) |
+| `backend/main.py` | `EXTENSION_TO_ALLOWED_MIMES` | `dict` | No | Static process constant | **SAFE** (Static configuration) |
+| `backend/src/parsers/tabular_parser.py` | `EXTENSION_TO_ALLOWED_MIMES` | `dict` | No | Static process constant | **SAFE** (Static configuration) |
+| `backend/src/parsers/tabular_parser.py` | `DANGEROUS_EXTENSIONS` | `set` | No | Static process constant | **SAFE** (Static configuration) |
+| `backend/src/parsers/sanitization.py` | `FORMULA_PREFIXES` | `tuple` | No | Static process constant | **SAFE** (Static configuration) |
+| `backend/src/parsers/imputation.py` | None | N/A | No | Pure stateless transforms | **SAFE** (Stateless) |
+| `backend/src/analytics/loader.py` | `MODEL_REGISTRY` | `dict` | No | Lazy startup load of pre-trained `.joblib` models | **SAFE** (Model artifacts only, Spec §5.2) |
+| `backend/src/analytics/forecast_engine.py` | `FREQ_CONFIGS` | `dict` | No | Static time-series frequency definitions | **SAFE** (Static configuration) |
+| `backend/src/orchestrator/chart_picker.py` | None | N/A | No | Pure rule-based heuristic routing | **SAFE** (Stateless) |
+| `backend/src/memory/lifecycle.py` | Synthetic OpenMP Warmup | `ndarray` | No | Static synthetic array allocated once on startup | **SAFE** (Process warm-up) |
+

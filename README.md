@@ -45,6 +45,11 @@ Foresight is an intelligent forecasting system consisting of multiple predictive
 - **Windows OpenMP Contention Fix**: Capping `n_jobs=2` on XGBoost and limiting threads inside compute jobs prevents Windows thread pool contention on 16–24 core CPUs, eliminating a 4,400ms cold-start stall and stabilizing fits to 21–25ms.
 - **Startup Gaussian Warmup**: Module load triggers `_warmup()` with synthetic Gaussian random data (`rng.randn(100, 15)`), forcing depth-4 tree construction and priming OpenMP thread pools before the first real request arrives.
 
+### 5. Zero-Retention Architecture & Cross-Request Invariants (Spec §1.1)
+- **Elimination of Process-Level `DATA_STORE`**: Removed the module-level dictionary `DATA_STORE` on the canonical app (`backend/main.py`). Uploaded datasets (raw DataFrames, imputed modeling DataFrames, null profiles, parsed document text) are never retained across requests.
+- **Guaranteed Ephemeral Lifecycle**: All tabular and document parsing operations execute in-memory via `io.BytesIO` inside `ephemeral_processing()`. Explicit variable dereferencing (`del`) and `gc.collect()` run inside guaranteed `finally` blocks on both success (200) and error (4xx/500) paths.
+- **Contract & Identity Preservation**: The upload contract (`UploadResponse`) retains `fileId` as an opaque correlation token with zero persisted state behind it, maintaining full backward compatibility with frontend clients.
+
 ---
 
 ## Changelog & Recent Fixes
@@ -1132,5 +1137,34 @@ A systematic read-only audit of the 10 chart tokens against the backend response
   - `python -m pyright backend/scripts/eval_quality_metrics.py backend/tests/test_phase3a_real_data.py`: **0 errors, 0 warnings, 0 informations**.
   - `pytest backend/tests/test_phase3a_real_data.py`: **7 passed, 0 failed in 11.75s**.
   - `python backend/scripts/eval_quality_metrics.py`: Ran to completion with 0 runtime errors.
+
+## Update 2026-10-19 (Zero-Retention Fix, Cross-Request State Sweep & Agent Workspace Untracking)
+- **Task**: Enforce zero-retention invariant on upload endpoints per Master Spec §1.1, untrack `.agents/` workspace files, sweep codebase for cross-request state, and verify memory bounds.
+- **Environment**: OS = Windows 11 Home (win32, x64), Python = 3.14.3.
+- **Details**:
+  - **Zero-Retention Hardening on Canonical App (`backend/main.py`)**:
+    - Discovered and eliminated module-level `DATA_STORE` in `backend/main.py` which held uploaded DataFrames, null profile dicts, and parsed text without eviction.
+    - Removed unused `impute_for_modeling` calls from upload handlers (modeling imputation belongs exclusively in downstream modeling engines).
+    - Wrapped all request processing inside `ephemeral_processing()` with an explicit `finally:` block that executes `del` on all DataFrame and buffer references followed by `gc.collect()`, executing on both success (200) and error (4xx/500) paths.
+    - Preserved `UploadResponse` contract (`fileId` returned as opaque identifier with 0 persistent state stored behind it).
+  - **Empirical Memory Benchmark (30 Uploads of ~4.89 MB CSV)**:
+    - *Pre-Fix*: RSS grew from 339.33 MB to 445.76 MB (+106.43 MB). Live DataFrames leaked from 3 to 63 (+20 per 10 uploads). Post-GC retained 63 DataFrames and 31 `DATA_STORE` entries.
+    - *Post-Fix*: RSS plateaued from 339.50 MB to 362.78 MB (+23.28 MB allocator buffer). Live DataFrames remained constant at 1 across all 30 uploads (0 leaked). Post-GC settled at 357.89 MB (+18.39 MB bounded overhead).
+  - **Test Inversion & New Zero-Retention Test Suite**:
+    - Inverted legacy retention assertions in [`backend/tests/test_upload_endpoint.py`](file:///d:/Foresight/backend/tests/test_upload_endpoint.py) and [`backend/tests/test_phase2_exit_criteria.py`](file:///d:/Foresight/backend/tests/test_phase2_exit_criteria.py) to assert `assert not hasattr(main, "DATA_STORE")`. Validated algorithmic divergence of raw null profiles vs median imputation in standalone pipelines.
+    - Added [`backend/tests/test_zero_retention.py`](file:///d:/Foresight/backend/tests/test_zero_retention.py) (4 tests) covering `/api/v1/upload` (CSVs, XLSX, text documents), `/api/v1/forecast`, `/api/v1/hypotheses`, and `/api/v1/segmentation` with bounded live DataFrame assertions.
+  - **Cross-Request State Sweep**:
+    - Audited all module-level scopes in `backend/main.py` and `backend/src/`.
+    - Confirmed that only immutable constants (`EXTENSION_TO_ALLOWED_MIMES`, `DANGEROUS_EXTENSIONS`, `FORMULA_PREFIXES`, `FREQ_CONFIGS`), pre-trained model registry (`MODEL_REGISTRY`), and startup warmup buffers exist. Zero user data is retained across requests.
+  - **Decision D1 Verification**:
+    - Assessed `backend/app/services/session_store.py` and `backend/app/routers/ingestion.py`. Decision D3 ("Retire `backend/app/main.py` and repoint `conftest.py` plus 8 test files to `main`") is deferred to Phase 4. Removing `ingestion.router` causes 20 upload tests across 4 active test files to fail (404); per WS-C guardrail ("stop and report instead of rewriting it"), WS-C was stopped and reported for Phase 4 unification.
+  - **Decision D2 (Untrack `.agents/`)**:
+    - Scanned `.agents/`: 0 API keys/secrets found, 11 files with Windows home paths, and 56 files with repo paths.
+    - Untracked 99 workspace files from git index (`git rm -r --cached .agents`) while preserving all local files on disk. Added `.agents/` to root `.gitignore`.
+- **Verification**:
+  - `pytest backend/tests/test_zero_retention.py -v`: **4 passed in 3.65s**.
+  - `pytest backend/tests/test_upload_endpoint.py -v`: **5 passed in 0.45s**.
+  - `pytest backend/tests/test_phase2_exit_criteria.py -v`: **6 passed in 0.48s**.
+
 
 
