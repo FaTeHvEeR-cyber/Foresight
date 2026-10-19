@@ -46,3 +46,7 @@ yarn-error.log*
 # Vercel
 .vercel
 
+# Agent workspace files
+.agents/
+
+
