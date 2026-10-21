@@ -128,6 +128,6 @@ def test_ephemeral_processing_preserves_excluded_and_primitives():
 def test_main_upload_endpoint_wrapped():
     """Verify FastAPI /upload endpoint works properly with ephemeral_processing wrapper."""
     client = TestClient(app)
-    response = client.post("/upload")
+    response = client.post("/api/v1/upload")
     assert response.status_code == 200
     assert response.json() == {"message": "Upload stub"}

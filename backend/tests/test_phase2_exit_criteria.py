@@ -38,7 +38,7 @@ def test_1_disallowed_extension_rejected(client):
 
     for filename, content, mime in disallowed_files:
         files = {"file": (filename, io.BytesIO(content), mime)}
-        res = client.post("/upload", files=files)
+        res = client.post("/api/v1/upload", files=files)
         assert res.status_code == 415, f"Expected 415 for {filename}, got {res.status_code}: {res.text}"
         detail = res.json()["detail"].lower()
         assert "unsupported file extension" in detail or "disallowed" in detail or "extension" in detail
@@ -59,7 +59,7 @@ def test_2_mismatched_mime_type_vs_extension_rejected(client):
 
     for filename, content, mime in mismatched_pairs:
         files = {"file": (filename, io.BytesIO(content), mime)}
-        res = client.post("/upload", files=files)
+        res = client.post("/api/v1/upload", files=files)
         assert res.status_code == 415, f"Expected 415 for mismatched {filename} with {mime}, got {res.status_code}"
         detail = res.json()["detail"].lower()
         assert "disagrees with file extension" in detail or "unsupported" in detail
@@ -67,11 +67,11 @@ def test_2_mismatched_mime_type_vs_extension_rejected(client):
 
 def test_3_file_size_limits_over_and_under_50mb(client):
     """Exit Criterion 3: A file over 50MB is rejected (413), a file under is accepted (200)."""
-    # 1. File strictly over 50MB: 50MB + 1024 bytes -> rejected with 413
-    oversized_size = 50 * 1024 * 1024 + 1024
-    oversized_bytes = b"0" * oversized_size
+    # 1. Multi-row file strictly over 50MB: 50MB + 1 byte -> rejected with 413
+    limit = 50 * 1024 * 1024
+    oversized_bytes = (b"123456789\n") * (limit // 10) + b"\n"
     files_oversized = {"file": ("large_data.csv", io.BytesIO(oversized_bytes), "text/csv")}
-    res_oversized = client.post("/upload", files=files_oversized)
+    res_oversized = client.post("/api/v1/upload", files=files_oversized)
     assert res_oversized.status_code == 413
     detail = res_oversized.json()["detail"].lower()
     assert "exceeds" in detail and "50mb" in detail
@@ -79,7 +79,7 @@ def test_3_file_size_limits_over_and_under_50mb(client):
     # 2. File under 50MB: valid CSV payload -> accepted with 200
     valid_csv = b"metric,value\nalpha,10.5\nbeta,20.2\n"
     files_valid = {"file": ("under_limit.csv", io.BytesIO(valid_csv), "text/csv")}
-    res_valid = client.post("/upload", files=files_valid)
+    res_valid = client.post("/api/v1/upload", files=files_valid)
     assert res_valid.status_code == 200
     data = res_valid.json()
     assert data["fileName"] == "under_limit.csv"
@@ -106,7 +106,7 @@ def test_4_dual_output_raw_null_profile_vs_imputed_modeling_data(client):
         "40.0,90000.0,HR,50.0\n"
     )
     files = {"file": ("null_profile_test.csv", io.BytesIO(csv_text.encode("utf-8")), "text/csv")}
-    res = client.post("/upload", files=files)
+    res = client.post("/api/v1/upload", files=files)
     assert res.status_code == 200
     data = res.json()
 
@@ -184,7 +184,7 @@ def test_6_upload_response_contract_compliance(client):
         "TX103,45.00,completed,verified\n"
     )
     files = {"file": ("transactions.csv", io.BytesIO(valid_csv.encode("utf-8")), "text/csv")}
-    res = client.post("/upload", files=files)
+    res = client.post("/api/v1/upload", files=files)
     assert res.status_code == 200
     data = res.json()
 

@@ -126,8 +126,6 @@ async def api_health():
 from fastapi.responses import JSONResponse
 
 
-@app.post("/upload", response_model=UploadResponse)
-@app.post("/api/upload", response_model=UploadResponse)
 @app.post("/api/v1/upload", response_model=UploadResponse)
 async def upload(file: Optional[UploadFile] = File(None)):
     """Ingest, validate, profile, and preprocess uploaded dataset or document.

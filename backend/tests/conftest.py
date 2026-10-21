@@ -9,8 +9,8 @@ from pypdf import PdfWriter
 import docx
 import openpyxl
 
-from app.main import app
-from app.config import settings
+from main import app
+from config.settings import settings
 
 
 @pytest.fixture

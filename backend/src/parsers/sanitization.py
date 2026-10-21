@@ -19,10 +19,7 @@ import zipfile
 from fastapi import HTTPException
 import pandas as pd
 
-try:
-    from config.settings import settings
-except ImportError:
-    from app.config import settings
+from config.settings import settings
 
 
 class SanitizationError(Exception):

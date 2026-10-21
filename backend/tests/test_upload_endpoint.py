@@ -25,7 +25,7 @@ def test_upload_tabular_csv_success(client):
         "Eve,,\n"
     )
     files = {"file": ("students.csv", io.BytesIO(csv_content.encode("utf-8")), "text/csv")}
-    res = client.post("/upload", files=files)
+    res = client.post("/api/v1/upload", files=files)
     assert res.status_code == 200
     data = res.json()
 
@@ -54,7 +54,7 @@ def test_upload_tabular_csv_success(client):
 def test_upload_document_pdf_success(client, sample_pdf_bytes):
     """Test successful document parsing through /upload."""
     files = {"file": ("report.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
-    res = client.post("/upload", files=files)
+    res = client.post("/api/v1/upload", files=files)
     assert res.status_code == 200
     data = res.json()
 
@@ -71,7 +71,7 @@ def test_upload_invalid_mime_fails_with_415(client):
     """Test MIME disagreement or invalid MIME returns HTTP 415 with clear error."""
     # CSV file with PDF MIME type (MIME / extension disagreement)
     files = {"file": ("data.csv", io.BytesIO(b"a,b,c\n1,2,3"), "application/pdf")}
-    res = client.post("/upload", files=files)
+    res = client.post("/api/v1/upload", files=files)
     assert res.status_code == 415
     assert "disagrees with file extension" in res.json()["detail"]
 
@@ -79,17 +79,17 @@ def test_upload_invalid_mime_fails_with_415(client):
 def test_upload_empty_file_fails_with_400(client):
     """Test empty file returns HTTP 400 with clear error."""
     files = {"file": ("empty.csv", io.BytesIO(b""), "text/csv")}
-    res = client.post("/upload", files=files)
+    res = client.post("/api/v1/upload", files=files)
     assert res.status_code == 400
     assert "Empty file" in res.json()["detail"]
 
 
 def test_upload_oversized_file_fails_with_413(client):
     """Test file exceeding MAX_FILE_SIZE_MB returns HTTP 413 with clear error."""
-    # 51 MB > 50 MB
-    large_bytes = b"0" * (51 * 1024 * 1024)
+    limit = 50 * 1024 * 1024
+    large_bytes = (b"123456789\n") * (limit // 10) + b"\n"
     files = {"file": ("huge.csv", io.BytesIO(large_bytes), "text/csv")}
-    res = client.post("/upload", files=files)
+    res = client.post("/api/v1/upload", files=files)
     assert res.status_code == 413
     assert "File exceeds" in res.json()["detail"]
 
@@ -118,7 +118,7 @@ from pathlib import Path
 )
 def test_regression_spoofed_executables_rejected_415(client, filename, mime, content):
     """Regression test F-08: Reject Linux ELF, PE, and Mach-O headers across .txt, .md, .csv with HTTP 415."""
-    res = client.post("/upload", files={"file": (filename, io.BytesIO(content), mime)})
+    res = client.post("/api/v1/upload", files={"file": (filename, io.BytesIO(content), mime)})
     assert res.status_code == 415
     detail = res.json()["detail"].lower()
     assert "executable" in detail or "disallowed" in detail
@@ -127,7 +127,7 @@ def test_regression_spoofed_executables_rejected_415(client, filename, mime, con
 def test_regression_shebang_script_rejected_415(client):
     """Reject shebang script named .txt with HTTP 415."""
     content = b"#!/bin/bash\necho 'malicious script'\n"
-    res = client.post("/upload", files={"file": ("run.txt", io.BytesIO(content), "text/plain")})
+    res = client.post("/api/v1/upload", files={"file": ("run.txt", io.BytesIO(content), "text/plain")})
     assert res.status_code == 415
     assert "Script / shell executable" in res.json()["detail"]
 
@@ -143,7 +143,7 @@ def test_regression_shebang_script_rejected_415(client):
 )
 def test_regression_spoofed_document_and_sheet_signatures_415(client, filename, mime, content):
     """Reject spoofed or unsupported document/sheet formats with HTTP 415."""
-    res = client.post("/upload", files={"file": (filename, io.BytesIO(content), mime)})
+    res = client.post("/api/v1/upload", files={"file": (filename, io.BytesIO(content), mime)})
     assert res.status_code == 415
 
 
@@ -155,7 +155,7 @@ def test_regression_valid_zip_not_workbook_rejected_422(client):
     zip_bytes = buf.getvalue()
 
     res = client.post(
-        "/upload",
+        "/api/v1/upload",
         files={
             "file": (
                 "archive.xlsx",
@@ -171,12 +171,12 @@ def test_regression_valid_zip_not_workbook_rejected_422(client):
 def test_regression_missing_and_disallowed_extensions_415(client):
     """Reject uploads with no extension or disallowed extension with HTTP 415."""
     # No extension
-    res_no_ext = client.post("/upload", files={"file": ("raw_data", io.BytesIO(b"a,b,c\n1,2,3"), "text/plain")})
+    res_no_ext = client.post("/api/v1/upload", files={"file": ("raw_data", io.BytesIO(b"a,b,c\n1,2,3"), "text/plain")})
     assert res_no_ext.status_code == 415
     assert "has no valid extension" in res_no_ext.json()["detail"]
 
     # Disallowed extension
-    res_disallowed = client.post("/upload", files={"file": ("payload.py", io.BytesIO(b"print('hack')"), "text/x-python")})
+    res_disallowed = client.post("/api/v1/upload", files={"file": ("payload.py", io.BytesIO(b"print('hack')"), "text/x-python")})
     assert res_disallowed.status_code == 415
     assert "Unsupported file extension" in res_disallowed.json()["detail"]
 
@@ -204,7 +204,7 @@ def test_regression_all_fixtures_return_200(
         ("test.md", sample_md_bytes, "text/markdown"),
     ]
     for filename, content, mime in fixtures:
-        res = client.post("/upload", files={"file": (filename, io.BytesIO(content), mime)})
+        res = client.post("/api/v1/upload", files={"file": (filename, io.BytesIO(content), mime)})
         assert res.status_code == 200, f"Expected 200 for {filename}, got {res.status_code}: {res.text}"
 
 
@@ -223,7 +223,7 @@ def test_regression_real_datasets_return_200(client, wholesale_df, bike_df, reta
         for base in candidate_paths:
             p = base / fname
             if p.exists():
-                res = client.post("/upload", files={"file": (fname, io.BytesIO(p.read_bytes()), mime)})
+                res = client.post("/api/v1/upload", files={"file": (fname, io.BytesIO(p.read_bytes()), mime)})
                 assert res.status_code == 200, f"Expected 200 for {fname}, got {res.status_code}: {res.text}"
                 break
         else:
@@ -234,5 +234,5 @@ def test_regression_real_datasets_return_200(client, wholesale_df, bike_df, reta
                 b = retail_df.to_csv(index=False).encode("latin-1")
             else:
                 b = bike_df.to_csv(index=False).encode("utf-8")
-            res = client.post("/upload", files={"file": (fname, io.BytesIO(b), mime)})
+            res = client.post("/api/v1/upload", files={"file": (fname, io.BytesIO(b), mime)})
             assert res.status_code == 200

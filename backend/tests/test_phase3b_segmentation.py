@@ -29,7 +29,7 @@ from fastapi.testclient import TestClient
 from sklearn.datasets import make_blobs
 from sklearn.metrics import auc, precision_recall_curve, recall_score, roc_auc_score
 
-from app.main import app
+from main import app
 from src.analytics.outlier_engine import (
     MAX_LIVE_FIT_ROWS,
     MAX_SCATTER_POINTS,

@@ -6,7 +6,7 @@ from fastapi import status
 
 def test_upload_csv(client, sample_csv_bytes):
     files = {"file": ("dataset.csv", io.BytesIO(sample_csv_bytes), "text/csv")}
-    res = client.post("/api/upload", files=files)
+    res = client.post("/api/v1/upload", files=files)
     assert res.status_code == status.HTTP_200_OK
     data = res.json()
     assert data["detectedKind"] == "tabular"
@@ -20,7 +20,7 @@ def test_upload_csv(client, sample_csv_bytes):
 
 def test_upload_tsv(client, sample_tsv_bytes):
     files = {"file": ("data.tsv", io.BytesIO(sample_tsv_bytes), "text/tab-separated-values")}
-    res = client.post("/api/upload", files=files)
+    res = client.post("/api/v1/upload", files=files)
     assert res.status_code == status.HTTP_200_OK
     data = res.json()
     assert data["detectedKind"] == "tabular"
@@ -30,7 +30,7 @@ def test_upload_tsv(client, sample_tsv_bytes):
 
 def test_upload_xlsx(client, sample_xlsx_bytes):
     files = {"file": ("sheet.xlsx", io.BytesIO(sample_xlsx_bytes), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
-    res = client.post("/api/upload", files=files)
+    res = client.post("/api/v1/upload", files=files)
     assert res.status_code == status.HTTP_200_OK
     data = res.json()
     assert data["detectedKind"] == "tabular"
@@ -40,7 +40,7 @@ def test_upload_xlsx(client, sample_xlsx_bytes):
 
 def test_upload_parquet(client, sample_parquet_bytes):
     files = {"file": ("records.parquet", io.BytesIO(sample_parquet_bytes), "application/octet-stream")}
-    res = client.post("/api/upload", files=files)
+    res = client.post("/api/v1/upload", files=files)
     assert res.status_code == status.HTTP_200_OK
     data = res.json()
     assert data["detectedKind"] == "tabular"
@@ -50,7 +50,7 @@ def test_upload_parquet(client, sample_parquet_bytes):
 
 def test_upload_pdf(client, sample_pdf_bytes):
     files = {"file": ("dossier.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf")}
-    res = client.post("/api/upload", files=files)
+    res = client.post("/api/v1/upload", files=files)
     assert res.status_code == status.HTTP_200_OK
     data = res.json()
     assert data["detectedKind"] == "document"
@@ -60,7 +60,7 @@ def test_upload_pdf(client, sample_pdf_bytes):
 
 def test_upload_docx(client, sample_docx_bytes):
     files = {"file": ("summary.docx", io.BytesIO(sample_docx_bytes), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
-    res = client.post("/api/upload", files=files)
+    res = client.post("/api/v1/upload", files=files)
     assert res.status_code == status.HTTP_200_OK
     data = res.json()
     assert data["detectedKind"] == "document"
@@ -70,7 +70,7 @@ def test_upload_docx(client, sample_docx_bytes):
 
 def test_upload_txt(client, sample_txt_bytes):
     files = {"file": ("notes.txt", io.BytesIO(sample_txt_bytes), "text/plain")}
-    res = client.post("/api/upload", files=files)
+    res = client.post("/api/v1/upload", files=files)
     assert res.status_code == status.HTTP_200_OK
     data = res.json()
     assert data["detectedKind"] == "document"
@@ -80,7 +80,7 @@ def test_upload_txt(client, sample_txt_bytes):
 
 def test_upload_md(client, sample_md_bytes):
     files = {"file": ("report.md", io.BytesIO(sample_md_bytes), "text/markdown")}
-    res = client.post("/api/upload", files=files)
+    res = client.post("/api/v1/upload", files=files)
     assert res.status_code == status.HTTP_200_OK
     data = res.json()
     assert data["detectedKind"] == "document"
@@ -93,5 +93,5 @@ def test_health_check(client):
     assert res.status_code == status.HTTP_200_OK
     data = res.json()
     assert data["status"] == "healthy"
-    assert data["maxFileSizeBytes"] == 25 * 1024 * 1024
+    assert data["maxFileSizeBytes"] == 50 * 1024 * 1024
     assert data["rateLimitingEnabled"] is False

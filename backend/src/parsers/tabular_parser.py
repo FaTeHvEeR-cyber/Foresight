@@ -14,10 +14,7 @@ import pandas as pd
 
 from src.models import ColumnNullMetric, RawNullProfile
 
-try:
-    from config.settings import settings
-except ImportError:
-    from app.config import settings
+from config.settings import settings
 
 
 InferredType = Literal["numeric", "categorical", "datetime", "text", "boolean"]

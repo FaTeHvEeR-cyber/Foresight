@@ -10,7 +10,7 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
+from main import app
 from src.analytics.hypothesis_engine import run_hypotheses
 from src.orchestrator.chart_picker import heuristic_pick
 from src.orchestrator.chart_registry import ALLOWED
