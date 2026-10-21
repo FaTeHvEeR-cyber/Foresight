@@ -35,6 +35,7 @@ from src.parsers.sanitization import (
     FileSizeError,
     MimeTypeError,
     SanitizationError,
+    check_dangerous_and_magic_bytes,
     gatekeep_tabular_upload,
     sanitize_tabular_cells,
     validate_file_size,
@@ -162,9 +163,12 @@ async def upload(file: Optional[UploadFile] = File(None)):
             try:
                 validate_mime_and_extension(filename, file.content_type or "")
                 validate_file_size(file_bytes)
+            except HTTPException:
+                raise
             except (SanitizationError, MimeTypeError, FileSizeError) as exc:
                 error_msg = getattr(exc, "detail", str(exc))
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
+                error_status = getattr(exc, "status_code", status.HTTP_400_BAD_REQUEST)
+                raise HTTPException(status_code=error_status, detail=error_msg)
             except Exception as exc:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Validation failed: {str(exc)}")
 
@@ -180,6 +184,9 @@ async def upload(file: Optional[UploadFile] = File(None)):
             detected_format: DetectedFormat = cast(DetectedFormat, ext)
             file_id = f"f_{uuid.uuid4().hex[:12]}"
 
+            # 3.5 Run signature & magic byte checks across all uploads (tabular & document)
+            check_dangerous_and_magic_bytes(file_bytes, ext)
+
             # 4. For tabular: gatekeep → parse_tabular → sanitize_tabular_cells → compute_raw_null_profile
             if detected_kind == "tabular":
                 gatekeep_tabular_upload(filename, file_bytes, file.content_type)
@@ -187,7 +194,7 @@ async def upload(file: Optional[UploadFile] = File(None)):
                     raw_df = parse_tabular(file_bytes, ext)
                 except Exception as exc:
                     raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                         detail=f"Failed to parse tabular file '{safe_filename}': {type(exc).__name__}",
                     )
 
@@ -229,7 +236,7 @@ async def upload(file: Optional[UploadFile] = File(None)):
                     doc_result = parse_document(file_bytes, ext)
                 except Exception as exc:
                     raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                         detail=f"Failed to parse document file '{safe_filename}': {type(exc).__name__}",
                     )
 

@@ -363,6 +363,15 @@ PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 PARQUET_MAGIC = b"PAR1"
 ZIP_MAGIC = b"\x50\x4b\x03\x04"
 XLS_OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+PDF_MAGIC = b"%PDF-"
+MACHO_MAGICS = (
+    b"\xfe\xed\xfa\xce",  # Mach-O 32-bit big-endian
+    b"\xce\xfa\xed\xfe",  # Mach-O 32-bit little-endian
+    b"\xfe\xed\xfa\xcf",  # Mach-O 64-bit big-endian
+    b"\xcf\xfa\xed\xfe",  # Mach-O 64-bit little-endian
+    b"\xca\xfe\xba\xbe",  # Mach-O universal / fat binary
+    b"\xbe\xba\xfe\xca",  # Mach-O universal / fat binary little-endian
+)
 TABULAR_ALLOWED_EXTENSIONS: Set[str] = {"csv", "tsv", "xlsx", "xls", "parquet", "txt"}
 
 
@@ -377,6 +386,11 @@ def check_dangerous_and_magic_bytes(content: bytes, ext: str) -> None:
         raise HTTPException(
             status_code=415,
             detail="Disallowed binary signature detected: Linux ELF (Executable binaries disallowed)",
+        )
+    if any(content.startswith(magic) for magic in MACHO_MAGICS):
+        raise HTTPException(
+            status_code=415,
+            detail="Disallowed binary signature detected: Mach-O executable (Executable binaries disallowed)",
         )
     if content.startswith(b"#!"):
         raise HTTPException(
@@ -439,13 +453,46 @@ def check_dangerous_and_magic_bytes(content: bytes, ext: str) -> None:
                 status_code=422,
                 detail=f"Corrupted or invalid XLSX archive: {type(exc).__name__}",
             )
+    elif ext == "docx":
+        if not content.startswith(ZIP_MAGIC):
+            raise HTTPException(
+                status_code=415,
+                detail="Invalid ZIP archive: missing Office Open XML ZIP header",
+            )
+        try:
+            with zipfile.ZipFile(io.BytesIO(content)) as z:
+                namelist = z.namelist()
+                if "[Content_Types].xml" not in namelist:
+                    raise HTTPException(
+                        status_code=415,
+                        detail="Invalid ZIP archive: missing Office Open XML [Content_Types].xml",
+                    )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Corrupted or invalid DOCX archive: {type(exc).__name__}",
+            )
+    elif ext == "pdf":
+        if not content.startswith(PDF_MAGIC):
+            raise HTTPException(
+                status_code=415,
+                detail="Missing %PDF- file signature",
+            )
     elif ext == "xls":
         if not content.startswith(XLS_OLE_MAGIC):
             raise HTTPException(
                 status_code=415,
                 detail="Corrupted or invalid XLS file (missing OLE header)",
             )
-    elif ext in ("csv", "tsv", "txt"):
+    elif ext in ("txt", "md"):
+        if b"\x00" in content:
+            raise HTTPException(
+                status_code=415,
+                detail="Contains null byte binary data: Binary or malformed content detected (disallowed).",
+            )
+    elif ext in ("csv", "tsv"):
         if b"\x00" in content:
             raise HTTPException(
                 status_code=415,

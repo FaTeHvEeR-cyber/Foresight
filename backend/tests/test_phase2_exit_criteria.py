@@ -27,7 +27,7 @@ def client():
 
 
 def test_1_disallowed_extension_rejected(client):
-    """Exit Criterion 1: A file with a disallowed extension is rejected with HTTP 400."""
+    """Exit Criterion 1: A file with a disallowed extension is rejected with HTTP 415."""
     disallowed_files = [
         ("malware.exe", b"MZ\x90\x00executable", "application/octet-stream"),
         ("exploit.py", b"import os; os.system('ls')", "text/x-python"),
@@ -39,13 +39,13 @@ def test_1_disallowed_extension_rejected(client):
     for filename, content, mime in disallowed_files:
         files = {"file": (filename, io.BytesIO(content), mime)}
         res = client.post("/upload", files=files)
-        assert res.status_code == 400, f"Expected 400 for {filename}, got {res.status_code}: {res.text}"
+        assert res.status_code == 415, f"Expected 415 for {filename}, got {res.status_code}: {res.text}"
         detail = res.json()["detail"].lower()
         assert "unsupported file extension" in detail or "disallowed" in detail or "extension" in detail
 
 
 def test_2_mismatched_mime_type_vs_extension_rejected(client):
-    """Exit Criterion 2: A file with a mismatched MIME type vs. extension is rejected with HTTP 400."""
+    """Exit Criterion 2: A file with a mismatched MIME type vs. extension is rejected with HTTP 415."""
     mismatched_pairs = [
         # CSV with PDF MIME type
         ("dataset.csv", b"a,b,c\n1,2,3", "application/pdf"),
@@ -60,19 +60,19 @@ def test_2_mismatched_mime_type_vs_extension_rejected(client):
     for filename, content, mime in mismatched_pairs:
         files = {"file": (filename, io.BytesIO(content), mime)}
         res = client.post("/upload", files=files)
-        assert res.status_code == 400, f"Expected 400 for mismatched {filename} with {mime}, got {res.status_code}"
+        assert res.status_code == 415, f"Expected 415 for mismatched {filename} with {mime}, got {res.status_code}"
         detail = res.json()["detail"].lower()
         assert "disagrees with file extension" in detail or "unsupported" in detail
 
 
 def test_3_file_size_limits_over_and_under_50mb(client):
-    """Exit Criterion 3: A file over 50MB is rejected (400), a file under is accepted (200)."""
-    # 1. File strictly over 50MB: 50MB + 1024 bytes -> rejected with 400
+    """Exit Criterion 3: A file over 50MB is rejected (413), a file under is accepted (200)."""
+    # 1. File strictly over 50MB: 50MB + 1024 bytes -> rejected with 413
     oversized_size = 50 * 1024 * 1024 + 1024
     oversized_bytes = b"0" * oversized_size
     files_oversized = {"file": ("large_data.csv", io.BytesIO(oversized_bytes), "text/csv")}
     res_oversized = client.post("/upload", files=files_oversized)
-    assert res_oversized.status_code == 400
+    assert res_oversized.status_code == 413
     detail = res_oversized.json()["detail"].lower()
     assert "exceeds" in detail and "50mb" in detail
 
