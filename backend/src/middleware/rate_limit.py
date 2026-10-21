@@ -1,19 +1,19 @@
 """Rate limiting middleware placeholder (scaffolded for Phase 5, inert by default)."""
 
-import time
 from collections import defaultdict, deque
+import time
 from typing import DefaultDict, Deque
+from fastapi import status
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
-from fastapi import status
 
-from app.config import settings
+from config.settings import settings
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """
-    Lightweight in-memory sliding window rate limiter placeholder.
+    """Lightweight in-memory sliding window rate limiter placeholder.
+
     Inert during Phases 2-4 (ENABLE_RATE_LIMITING = False) to prevent throttling local dev/testing.
     Can be toggled via ENABLE_RATE_LIMITING=True in settings/env.
     """
