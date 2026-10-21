@@ -1166,5 +1166,37 @@ A systematic read-only audit of the 10 chart tokens against the backend response
   - `pytest backend/tests/test_upload_endpoint.py -v`: **5 passed in 0.45s**.
   - `pytest backend/tests/test_phase2_exit_criteria.py -v`: **6 passed in 0.48s**.
 
+## Update 2026-10-21 (Phase 4 Task 1: Backend Consolidation onto Canonical `main.py` & Ingress Hardening)
+- **Task**: Phase 4 Task 1 Backend Consolidation. Retire legacy `backend/app/`, consolidate on canonical `backend/main.py`, remove session store, eliminate `/upload` and `/api/upload` route aliases (retaining strictly `/api/v1/upload`), enforce dangerous signature & magic byte checks across all uploads (Finding F-08 remediation), preserve HTTP exception status codes, preserve `rate_limit.py` under `backend/src/middleware/`, establish 100% green test suite across 439 tests.
+- **Environment**: OS = Windows 11 Home (win32, x64), Python = 3.14.3.
+- **Architectural & Design Updates**:
+  - **Retirement of `backend/app/`**: Deleted legacy `backend/app/` directory (`routers/ingestion.py`, `services/validator.py`, `services/preprocessor.py`, `services/profiler.py`, `services/session_store.py`, `middleware/size_guard.py`).
+  - **Canonical Gateway Authority**: Canonical `backend/main.py` is now the single source of truth for routing, ingestion, preprocessing, inference, and memory lifecycle.
+  - **Route Consolidation**: Removed route aliases `@app.post("/upload")` and `@app.post("/api/upload")`. The sole supported file ingestion route is `POST /api/v1/upload`. Removed alias routes return HTTP 404.
+  - **Preservation of `rate_limit.py`**: Moved `backend/app/middleware/rate_limit.py` to `backend/src/middleware/rate_limit.py` unchanged (unmounted, flag off) for Phase 5 rate-limiting selection.
+- **Defect Logs & Security Hardening (Finding F-08)**:
+  - **F-08 (MIME/Magic-Byte Execution Signature Bypass on Ingress Uploads, Rated Medium)**:
+    - *Vulnerability*: `/api/v1/upload` only verified extension and MIME type, skipping binary magic byte and executable signature checks (`\x7fELF`, `MZ`, Mach-O, shebang scripts `#!`). Attackers could upload compiled binaries or shell scripts disguised with allowed extensions (`.txt`, `.md`, `.csv`).
+    - *Fix*: Integrated `check_dangerous_and_magic_bytes(file_bytes, ext)` into `backend/main.py` step 3.5 across all upload formats (tabular and document alike).
+    - *Status Code Preservation*: Replaced hardcoded HTTP 400 error catch with `getattr(exc, "status_code", 400)`, ensuring proper HTTP status code semantics:
+      - 415: Disallowed extension, missing extension, or magic byte signature mismatch (e.g. non-ZIP disguised as `.xlsx`, ELF/PE disguised as `.txt`/`.md`/`.csv`).
+      - 422: Corrupt or unparseable payload with valid container/magic bytes (e.g. valid ZIP archive that is not a valid Excel workbook).
+      - 413: File exceeding 50.0 MB limit or single CSV field exceeding 10 MB limit.
+      - 400: Empty file (0-byte payload).
+- **Test Arithmetic & Mapping**:
+  - *Baseline before consolidation*: 430 tests.
+  - *Deleted legacy-only tests (-16)*: `test_validator.py` (7), `test_preprocessor.py` (2), `test_profiler.py` (2), `test_ingestion_api.py` (5).
+  - *Net baseline*: 414 tests.
+  - *Added tests (+25)*:
+    - `backend/tests/test_upload_endpoint.py` (+18 regression tests for F-08 executables, shebang scripts, spoofed document/sheet formats, valid ZIP non-workbook, real fixtures).
+    - `backend/tests/test_oversized.py` (+1 test for 10 MB single-field guard; updated 26MB tests to multi-row 50MB+1 byte).
+    - `backend/tests/test_consolidation_invariants.py` (+4 tests asserting route table, 404 on removed routes, non-importability of `app` and `session_store`).
+    - `backend/tests/test_zero_retention.py` (+2 tests: 20 sequential document uploads, 30 sequential XLSX 4MB in-memory uploads with RSS tracking).
+  - *Total Test Suite*: **439 passed, 0 failed in 401.79s** (100% green).
+- **Verification Results**:
+  - `pytest backend/tests`: 439 passed, 0 failed.
+  - `python backend/scripts/audit_artifact_size.py`: 2.53 MB total (5.1% of 50.0 MB spec ceiling).
+
+
 
 

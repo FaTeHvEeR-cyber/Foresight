@@ -85,6 +85,8 @@ The initial first-pass audit draft (which ran only 35 tests and claimed zero fin
 | **F-04** | **LOW** | Vector 5 | Filename Path Traversal & Null Byte Echo | Raw filename echoed in error detail; `%00` not caught | Added `os.path.basename()` sanitization and `%00` rejection | **VERIFIED FIXED** |
 | **F-05** | **MEDIUM** | Vector 4 | Pathological Single-Cell Memory Spike | Pathological CSV with single 40 MB string cell peaked at 698.6 MB RSS (delta 293.2 MB), exceeding 512 MB Render ceiling | Implemented pre-parse and parse-time 10 MB single-field length gatekeeper rejecting cells $> 10\text{ MB}$ with HTTP 413 | **VERIFIED FIXED** |
 | **F-06** | **MEDIUM** | Vector 4 | Date Sniffing Hang on Giant Text Cells | `pd.to_datetime(format="mixed")` ran mixed regexes on 30MB cells | Fast-path check: string length $> 100$ skips date inference | **VERIFIED FIXED** |
+| **F-07** | **HIGH** | Vector 1 | Module-Level In-Memory Dataset Retention | In-memory `DATA_STORE` retained uploaded DataFrames across requests indefinitely | Removed `DATA_STORE`, guaranteed ephemeral dereferencing and garbage collection | **VERIFIED FIXED** |
+| **F-08** | **MEDIUM** | Vector 5 | Upload Signature Bypass on Canonical Route | Magic byte and executable binary checks ran on inference endpoints but were missing on `/api/v1/upload` | Enforce `check_dangerous_and_magic_bytes` across all upload paths; preserve HTTP status codes | **VERIFIED FIXED** |
 
 ---
 
@@ -337,8 +339,34 @@ A systematic audit was conducted across all module-level scopes in `backend/main
 | `backend/src/parsers/tabular_parser.py` | `DANGEROUS_EXTENSIONS` | `set` | No | Static process constant | **SAFE** (Static configuration) |
 | `backend/src/parsers/sanitization.py` | `FORMULA_PREFIXES` | `tuple` | No | Static process constant | **SAFE** (Static configuration) |
 | `backend/src/parsers/imputation.py` | None | N/A | No | Pure stateless transforms | **SAFE** (Stateless) |
-| `backend/src/analytics/loader.py` | `MODEL_REGISTRY` | `dict` | No | Lazy startup load of pre-trained `.joblib` models | **SAFE** (Model artifacts only, Spec §5.2) |
+| `backend/src/analytics/loader.py` | None (`UnsupportedFormat`, `load_tabular`) | functions / exception | No | Pure stateless data loader; models are loaded lazily in `main.py` via `_load_engine_a_models()` / `_load_engine_b_models()` | **SAFE** (Stateless) |
 | `backend/src/analytics/forecast_engine.py` | `FREQ_CONFIGS` | `dict` | No | Static time-series frequency definitions | **SAFE** (Static configuration) |
 | `backend/src/orchestrator/chart_picker.py` | None | N/A | No | Pure rule-based heuristic routing | **SAFE** (Stateless) |
 | `backend/src/memory/lifecycle.py` | Synthetic OpenMP Warmup | `ndarray` | No | Static synthetic array allocated once on startup | **SAFE** (Process warm-up) |
+
+---
+
+## 7. Addendum: Unified Upload Security Signatures & Backend Consolidation (F-08)
+
+### 7.1. Finding Summary & Classification
+
+- **Finding ID**: **F-08**
+- **Severity**: **MEDIUM** (Signature/Magic-Byte Bypass on Canonical Ingress Route; bytes decoded as text but never executed)
+- **Vector**: **Vector 5: Logic Flaws & File Format Gatekeeping**
+- **Affected Endpoints**: `POST /api/v1/upload` in canonical application (`backend/main.py`)
+- **Root Cause**:
+  While the legacy `backend/app/services/validator.py` checked dangerous executable signatures (ELF `\x7fELF`, PE `MZ`, Mach-O `\xca\xfe\xba\xbe`, `\xfe\xed\xfa\xce/cf`, shebang scripts `#!`), the canonical `backend/main.py` gatekeeper only ran extension/MIME verification on the upload path. Inference endpoints (`/forecast`, `/hypotheses`, `/segmentation`) ran `check_dangerous_and_magic_bytes`, but `/api/v1/upload` bypassed these checks for non-tabular document files (`.pdf`, `.docx`, `.doc`, `.txt`, `.md`). Furthermore, exceptions in the upload path collapsed distinct HTTP error statuses (`MimeTypeError` 415, `FileSizeError` 413, `SanitizationError` 422) to a hardcoded 400.
+- **Audit Verdict Status**:
+  **VERIFIED FIXED**. Canonical `main.py` now unconditionally invokes `check_dangerous_and_magic_bytes(file_bytes, ext)` for all uploads (tabular and document alike) prior to parsing, and preserves the exception's own status code via `getattr(exc, "status_code", 400)`.
+
+### 7.2. Status Code Policy & Differentiation
+- **Signature Mismatch / Disallowed Extension / Missing Extension**: HTTP 415 (Unsupported Media Type).
+- **Corrupt / Unreadable Structure (e.g. Valid ZIP that is not an Excel workbook)**: HTTP 422 (Unprocessable Content).
+- **Non-ZIP bytes masquerading as `.xlsx`**: HTTP 415 (Signature mismatch).
+- **Oversized Payload (> 50.0 MB or single field > 10 MB)**: HTTP 413 (Content Too Large).
+- **Empty Payload (0-byte)**: HTTP 400 (Bad Request).
+
+### 7.3. Test Suite Verification
+- Added 18 regression tests in `backend/tests/test_upload_endpoint.py` covering spoofed ELF/PE/Mach-O as `.txt`, `.md`, `.csv`, shebang scripts, spoofed `.pdf`/`.docx`/`.doc`/`.xlsx`, valid ZIP non-workbooks (422), missing/disallowed extensions (415), real dataset fixtures (200), and large multi-row in-memory 50MB+1 byte payloads (413).
+
 

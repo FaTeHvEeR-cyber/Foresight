@@ -281,4 +281,26 @@ Agent Split:
   - `b3c8181`: `fix(upload): stop retaining parsed uploads in DATA_STORE (zero-retention)`
   - `2dbf1e0`: `chore(repo): untrack agent workspace files`
 
+---
+
+## 12. Phase 4 Task 1: Backend Consolidation onto Canonical `backend/main.py`
+
+- **Environment**: OS = Windows 11 Home (win32, x64), Python = 3.14.3.
+- **Goal**: Retire legacy `backend/app/`, consolidate routing and ingestion onto canonical `backend/main.py`, remove session store, eliminate `/upload` and `/api/upload` route aliases (retaining strictly `/api/v1/upload`), enforce dangerous signature and magic byte checks on all uploads (Finding F-08 remediation), preserve HTTP error status codes, preserve `rate_limit.py` under `backend/src/middleware/`, establish 100% green test suite across 439 tests.
+- **Architectural & Design Changes**:
+  - **`backend/app/` Retirement**: Completely removed legacy `backend/app/` directory and bytecode caches.
+  - **Single Source of Truth**: All routing, middleware, file validation, pre-parsing, and model inference are driven by `backend/main.py`.
+  - **Route Table Hardening**: Removed `@app.post("/upload")` and `@app.post("/api/upload")`. Only `/api/v1/upload` is mounted; legacy paths return HTTP 404.
+  - **Middleware Preservation**: Moved `rate_limit.py` unchanged to `backend/src/middleware/rate_limit.py` (unmounted, flag off) with test updated to a minimal test app.
+- **Remediations (F-08)**:
+  - Added `check_dangerous_and_magic_bytes(file_bytes, ext)` to `main.py` step 3.5 across all upload formats (tabular and document alike).
+  - Preserved exception status codes via `getattr(exc, "status_code", 400)` (415 for signature mismatch/disallowed extension, 422 for corrupt valid zip, 413 for oversized, 400 for empty).
+- **Test Arithmetic**:
+  - Initial tests: 430.
+  - Removed legacy tests (-16): `test_validator.py` (7), `test_preprocessor.py` (2), `test_profiler.py` (2), `test_ingestion_api.py` (5).
+  - Added tests (+25): `test_upload_endpoint.py` (+18), `test_oversized.py` (+1), `test_consolidation_invariants.py` (+4), `test_zero_retention.py` (+2).
+  - Total: **439 passed, 0 failed in 401.79s**.
+- **Model Artifact Footprint**: 2.53 MB total across 10 artifacts (5.1% of 50.0 MB ceiling).
+
+
 
