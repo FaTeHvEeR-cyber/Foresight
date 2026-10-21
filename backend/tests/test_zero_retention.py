@@ -38,6 +38,38 @@ def _get_module_container_sizes() -> dict[str, int]:
     return sizes
 
 
+def _get_rss_mb() -> float:
+    """Measure Resident Set Size in MB using Windows API with safe fallback."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class PMC(ctypes.Structure):
+            _fields_ = [
+                ("cb", wintypes.DWORD),
+                ("PageFaultCount", wintypes.DWORD),
+                ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t),
+                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t),
+            ]
+
+        fn = ctypes.windll.psapi.GetProcessMemoryInfo
+        fn.argtypes = [wintypes.HANDLE, ctypes.POINTER(PMC), wintypes.DWORD]
+        fn.restype = wintypes.BOOL
+        pmc = PMC()
+        pmc.cb = ctypes.sizeof(PMC)
+        if fn(ctypes.windll.kernel32.GetCurrentProcess(), ctypes.byref(pmc), pmc.cb):
+            return pmc.WorkingSetSize / (1024 * 1024)
+    except Exception:
+        pass
+    return 0.0
+
+
 class TestZeroRetention:
     """Test zero retention of uploaded and inferred data across canonical endpoints."""
 
@@ -176,3 +208,89 @@ class TestZeroRetention:
         df_count_after = _count_live_dataframes()
         df_growth = df_count_after - df_count_before
         assert df_growth <= 2, f"Live DataFrame growth on /segmentation was {df_growth} (expected <= 2)"
+
+    def test_document_paths_zero_retention(
+        self,
+        sample_pdf_bytes,
+        sample_docx_bytes,
+        sample_txt_bytes,
+        sample_md_bytes,
+    ):
+        """Sequential uploads of PDF, DOCX, TXT, and MD documents do not leak DataFrames or process state."""
+        gc.collect()
+        df_count_before = _count_live_dataframes()
+        containers_before = _get_module_container_sizes()
+
+        doc_fixtures = [
+            ("doc.pdf", sample_pdf_bytes, "application/pdf"),
+            ("doc.docx", sample_docx_bytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+            ("notes.txt", sample_txt_bytes, "text/plain"),
+            ("report.md", sample_md_bytes, "text/markdown"),
+        ]
+
+        # 5 cycles of 4 document formats (20 uploads total)
+        for cycle in range(5):
+            for fname, content, mime in doc_fixtures:
+                res = client.post(
+                    "/api/v1/upload",
+                    files={"file": (f"{cycle}_{fname}", io.BytesIO(content), mime)},
+                )
+                assert res.status_code == 200, f"Document upload {cycle}_{fname} failed: {res.text}"
+                data = res.json()
+                assert data["detectedKind"] == "document"
+                assert "fileId" in data
+
+        gc.collect()
+        df_count_after = _count_live_dataframes()
+        containers_after = _get_module_container_sizes()
+
+        # Assert no live DataFrames leaked from document parsing
+        assert df_count_after - df_count_before <= 2
+        for name, size_before in containers_before.items():
+            assert containers_after.get(name, 0) == size_before
+
+    def test_xlsx_30_uploads_rss_benchmark(self):
+        """Benchmark 30 sequential in-memory uploads of ~5MB XLSX to verify bounded RSS and zero retention."""
+        # Generate ~4MB realistic in-memory XLSX workbook (3,500 rows, 85 columns)
+        rng = np.random.default_rng(123)
+        df = pd.DataFrame(rng.standard_normal((3500, 85)))
+        buf = io.BytesIO()
+        with pd.ExcelWriter(buf, engine="openpyxl") as w:
+            df.to_excel(w, index=False)
+        xlsx_bytes = buf.getvalue()
+        del df, buf
+        gc.collect()
+
+        assert len(xlsx_bytes) >= 2.5 * 1024 * 1024, f"XLSX payload should be multi-megabyte, got {len(xlsx_bytes)} bytes"
+
+        # Warm-up upload
+        client.post(
+            "/api/v1/upload",
+            files={"file": ("warmup.xlsx", io.BytesIO(xlsx_bytes), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+        gc.collect()
+
+        rss_before = _get_rss_mb()
+        df_count_before = _count_live_dataframes()
+
+        # Run 30 sequential uploads of the multi-megabyte in-memory XLSX
+        for i in range(30):
+            res = client.post(
+                "/api/v1/upload",
+                files={"file": (f"bench_{i}.xlsx", io.BytesIO(xlsx_bytes), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+            )
+            assert res.status_code == 200, f"Upload {i} failed: {res.text}"
+
+        gc.collect()
+        rss_after = _get_rss_mb()
+        df_count_after = _count_live_dataframes()
+
+        # Verify DataFrames are dereferenced and garbage collected
+        df_growth = df_count_after - df_count_before
+        assert df_growth <= 2, f"Live DataFrame growth was {df_growth} (expected <= 2)"
+
+        # If RSS measurement is active on Windows, assert bounded RSS delta (no monotonic accumulation)
+        if rss_before > 0 and rss_after > 0:
+            rss_delta = rss_after - rss_before
+            assert rss_delta < 150.0, f"Excessive RSS growth: {rss_delta:.1f} MB (before={rss_before:.1f}, after={rss_after:.1f})"
+

@@ -210,8 +210,8 @@ async def upload(file: Optional[UploadFile] = File(None)):
                 }
                 columns = [
                     ColumnDescriptor(
-                        name=col_name,
-                        inferredType=inferred_types.get(col_name, "text"),
+                        name=str(col_name),
+                        inferredType=inferred_types.get(str(col_name), "text"),
                         nullCount=p.nullCount if p.nullCount is not None else 0,
                         nullPercentage=p.nullPercentage,
                     )
@@ -220,7 +220,7 @@ async def upload(file: Optional[UploadFile] = File(None)):
 
                 # Populate raw null profile dictionary (for UI reporting and warnings)
                 raw_null_profile_payload = {
-                    (p.columnName or col): {
+                    str(p.columnName or col): {
                         "nullCount": p.nullCount if p.nullCount is not None else 0,
                         "nullPercentage": p.nullPercentage if p.nullPercentage is not None else 0.0,
                         "totalRows": p.totalRows if p.totalRows is not None else row_count,
