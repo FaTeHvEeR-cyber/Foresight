@@ -79,6 +79,10 @@ def test_main_app_routes():
     assert res_health.json()["status"] == "ok"
     assert res_health.json()["rate_limiting_enabled"] is False
 
-    # POST /upload stub
-    res_upload = client.post("/upload")
+    # POST /api/v1/upload
+    res_upload = client.post(
+        "/api/v1/upload",
+        files={"file": ("test.csv", b"a,b\n1,2\n3,4", "text/csv")},
+    )
     assert res_upload.status_code == 200
+    assert res_upload.json()["fileName"] == "test.csv"

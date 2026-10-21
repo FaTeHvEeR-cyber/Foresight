@@ -52,9 +52,9 @@ class TestIngestionBoundaries:
         r_hyp = client.post("/api/v1/hypotheses", files={"file": ("empty.csv", b"")}, data={"use_llm": "false"})
         assert r_hyp.status_code == 422, f"Expected 422 for empty CSV in hypotheses, got {r_hyp.status_code}: {r_hyp.text}"
 
-        # /upload endpoint (Phase 2) with empty file rejects with 400
-        r_up = client.post("/upload", files={"file": ("empty.csv", b"", "text/csv")})
-        assert r_up.status_code == 400, f"Expected 400 for empty file on /upload, got {r_up.status_code}: {r_up.text}"
+        # /api/v1/upload endpoint with empty file rejects with 400
+        r_up = client.post("/api/v1/upload", files={"file": ("empty.csv", b"", "text/csv")})
+        assert r_up.status_code == 400, f"Expected 400 for empty file on /api/v1/upload, got {r_up.status_code}: {r_up.text}"
         assert "empty" in r_up.json().get("detail", "").lower()
 
     def test_corrupted_files_return_422_not_500(self):
