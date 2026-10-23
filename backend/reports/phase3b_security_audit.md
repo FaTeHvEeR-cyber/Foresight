@@ -329,20 +329,28 @@ Evaluated on **Windows 11 Home (win32, x64)** with **Python 3.14.3** using a wor
 
 ### 6.5. Cross-Request State Sweep
 
-A systematic audit was conducted across all module-level scopes in `backend/main.py` and `backend/src/` for state retention, caches, registries, and singletons:
+A mechanical AST and symbol scan was conducted across all module-level scopes in `backend/main.py` and `backend/src/` (30 Python files) for state retention, caches, registries, singletons, and `global` statements:
 
 | File / Component | Scoped Structure | Type | Holds User Data? | Eviction Policy / Lifetime | Risk Assessment & Verdict |
 | :--- | :--- | :---: | :---: | :---: | :--- |
-| `backend/main.py` | `DATA_STORE` | `dict` | **YES** (DataFrames, profiles, text) | None (unbounded leak) | **HIGH RISK — ELIMINATED** (Zero retention restored) |
-| `backend/main.py` | `EXTENSION_TO_ALLOWED_MIMES` | `dict` | No | Static process constant | **SAFE** (Static configuration) |
-| `backend/src/parsers/tabular_parser.py` | `EXTENSION_TO_ALLOWED_MIMES` | `dict` | No | Static process constant | **SAFE** (Static configuration) |
-| `backend/src/parsers/tabular_parser.py` | `DANGEROUS_EXTENSIONS` | `set` | No | Static process constant | **SAFE** (Static configuration) |
-| `backend/src/parsers/sanitization.py` | `FORMULA_PREFIXES` | `tuple` | No | Static process constant | **SAFE** (Static configuration) |
-| `backend/src/parsers/imputation.py` | None | N/A | No | Pure stateless transforms | **SAFE** (Stateless) |
-| `backend/src/analytics/loader.py` | None (`UnsupportedFormat`, `load_tabular`) | functions / exception | No | Pure stateless data loader; models are loaded lazily in `main.py` via `_load_engine_a_models()` / `_load_engine_b_models()` | **SAFE** (Stateless) |
-| `backend/src/analytics/forecast_engine.py` | `FREQ_CONFIGS` | `dict` | No | Static time-series frequency definitions | **SAFE** (Static configuration) |
-| `backend/src/orchestrator/chart_picker.py` | None | N/A | No | Pure rule-based heuristic routing | **SAFE** (Stateless) |
+| `backend/main.py:50,51` | `TABULAR_EXTENSIONS`, `DOCUMENT_EXTENSIONS` | `set` | No | Static set of allowed extensions | **SAFE** (Static configuration) |
+| `backend/main.py:70` | `app` | `FastAPI` | No | Framework application instance; zero session caches | **SAFE** (Application singleton) |
+| `backend/src/parsers/sanitization.py:83` | `EXTENSION_TO_ALLOWED_MIMES` | `dict` | No | Static extension-to-MIME dictionary | **SAFE** (Static configuration) |
+| `backend/src/parsers/sanitization.py:372` | `TABULAR_ALLOWED_EXTENSIONS` | `set` | No | Static extension whitelist | **SAFE** (Static configuration) |
+| `backend/src/parsers/sanitization.py` | `FORMULA_PREFIXES` | `tuple` | No | Static tuple of CSV injection prefixes | **SAFE** (Static configuration) |
+| `backend/src/parsers/document_parser.py:26` | `_SUPPORTED_EXTENSIONS` | `set` | No | Static document format set | **SAFE** (Static configuration) |
+| `backend/src/parsers/imputation.py` | `impute_for_modeling` | function | No | Dead runtime code; pure stateless transform invoked only in test suite | **SAFE** (Stateless) |
+| `backend/src/analytics/loader.py` | `load_tabular`, `UnsupportedFormat` | func / exc | No | Pure stateless data loader; no model registry or loaders exist here or in `main.py` | **SAFE** (Stateless) |
+| `backend/src/analytics/feature_pipeline.py:35` | `FREQ_CONFIGS` | `dict` | No | Static time-series frequency definitions | **SAFE** (Static configuration) |
+| `backend/src/analytics/feature_pipeline.py:42` | `_ID_NAME_HINTS` | `set` | No | Static column name heuristics | **SAFE** (Static configuration) |
+| `backend/src/analytics/feature_pipeline.py:440,441` | `LAG_PERIODS`, `ROLLING_WINDOWS` | `list` | No | Static feature engineering window definitions | **SAFE** (Static configuration) |
+| `backend/src/analytics/forecast_engine.py:18` | `XGB_PARAMS` | `dict` | No | Static hyperparameter mapping for live fitting | **SAFE** (Static configuration) |
+| `backend/src/orchestrator/chart_registry.py:10` | `EXAMPLE_RANKED_JSON` | `dict` | No | Static reference schema dictionary | **SAFE** (Static configuration) |
+| `backend/src/orchestrator/chart_picker.py` | Heuristic / LLM router | functions | No | Pure rule-based heuristic routing; no model or payload cache | **SAFE** (Stateless) |
+| `backend/src/training/train_engine_b_clustering.py:39` | `DEFAULT_NUMERIC_FEATURES` | `list` | No | Offline training default column list | **SAFE** (Static configuration) |
 | `backend/src/memory/lifecycle.py` | Synthetic OpenMP Warmup | `ndarray` | No | Static synthetic array allocated once on startup | **SAFE** (Process warm-up) |
+| **All Files (`main.py` + `src/`)** | `global` statements | N/A | No | **0 global statements found** across active code | **SAFE** (Zero global mutations) |
+
 
 ---
 

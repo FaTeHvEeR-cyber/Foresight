@@ -4,10 +4,10 @@ Implements the POST /upload endpoint with:
 - In-memory processing via io.BytesIO (no disk writes)
 - Validation via sanitization.py (MIME, extension, and file size guardrail)
 - Classification of detectedKind based on extension
-- Tabular pipeline: parse_tabular → sanitize_tabular_cells → compute_raw_null_profile → impute_for_modeling
+- Tabular pipeline: parse_tabular → sanitize_tabular_cells → compute_raw_null_profile
 - Document pipeline: parse_document
 - Wrapped in ephemeral_processing() lifecycle management
-- Returns UploadResponse with raw null profile (not imputed data)
+- Returns UploadResponse with raw null profile (not imputed data; modeling imputation is dead runtime code)
 """
 
 import gc

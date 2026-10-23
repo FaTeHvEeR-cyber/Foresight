@@ -1193,10 +1193,19 @@ A systematic read-only audit of the 10 chart tokens against the backend response
     - `backend/tests/test_consolidation_invariants.py` (+4 tests asserting route table, 404 on removed routes, non-importability of `app` and `session_store`).
     - `backend/tests/test_zero_retention.py` (+2 tests: 20 sequential document uploads, 30 sequential XLSX 4MB in-memory uploads with RSS tracking).
   - *Total Test Suite*: **439 passed, 0 failed in 401.79s** (100% green).
-- **Verification Results**:
-  - `pytest backend/tests`: 439 passed, 0 failed.
-  - `python backend/scripts/audit_artifact_size.py`: 2.53 MB total (5.1% of 50.0 MB spec ceiling).
-
-
-
-
+## Update 2026-10-23 (Phase 4 Task 1: Closure Gaps, Mechanical Sweep & Ingress Audit)
+- **Task**: Phase 4 Task 1 Closure Gaps Verification and Audit Reconciliation.
+- **Environment**: OS = Windows 11 Home (win32, x64, 10.0.26300), Python = 3.14.3.
+- **Architectural & Design Audits**:
+  - **Model Loading & Stateless Inference**: Verified that neither `backend/main.py` nor active routes (`/api/v1/forecast`, `/api/v1/hypotheses`, `/api/v1/segmentation`, `/api/v1/upload`) contain `_load_engine_a_models()` or `_load_engine_b_models()` or load `.joblib` files. All inference endpoints fit models live in-memory per request; `.joblib` artifacts (2.53 MB) serve strictly as offline benchmark references.
+  - **Mechanical Cross-Request State Sweep**: Executed an AST and symbol scan across all 30 Python modules in `backend/main.py` and `backend/src/`. Verified **zero `global` statements** and that all module-level collections are immutable process constants or framework singletons.
+  - **Ingress Spooling & Disk Persistence Audit**: Analyzed Starlette's `MultiPartParser` (`spool_max_size = 1024 * 1024`). Proved that uploads exceeding 1 MB trigger Python `SpooledTemporaryFile.rollover()` to create transient disk files in the OS temporary directory during request parsing, revealing an architectural discrepancy with Master Spec §1.1 zero-disk-write invariants. Outlined non-invasive remediation options (e.g. configuring `spool_max_size >= 50MB`).
+- **Empirical Memory & Test Verification**:
+  - **Red Proof**: Verified that reintroducing a module-level `DATA_STORE` write on the upload path causes `test_zero_retention.py::TestZeroRetention::test_upload_zero_retention` to fail immediately (`AssertionError: Container main.DATA_STORE grew from 1 to 12`).
+  - **30 x 4 MB XLSX RSS Benchmark**: Initial (0 uploads) = 432.58 MB (0 live DataFrames); 10 uploads = 445.41 MB; 20 uploads = 445.46 MB; 30 uploads = 440.68 MB; post-`gc.collect()` = 439.55 MB (0 live DataFrames).
+  - **Document Path Benchmark**: Initial = 336.96 MB; after 20 sequential document uploads (PDF, DOCX, TXT, MD) + `gc.collect()` = 342.50 MB (+5.54 MB delta; 0 live DataFrames).
+  - **Runtime Differential Analysis**: Quantified suite runtime delta (+122.8 s); new tests alone (`test_zero_retention.py`, `test_upload_endpoint.py`, `test_consolidation_invariants.py`) execute in 128.52 s, fully accounting for the increase.
+  - **Isolated Test Suites**:
+    - `pytest backend/tests/ -m latency`: **11 passed, 428 deselected in 58.86s**.
+    - Frontend unit tests (`npm test` in `frontend/`): **3 test suites passed, 76 passed, 0 failed in 9.55s**.
+    - Frontend type check (`npx tsc --noEmit` in `frontend/`): **Clean exit, 0 errors**.
