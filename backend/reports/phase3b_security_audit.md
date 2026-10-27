@@ -87,6 +87,8 @@ The initial first-pass audit draft (which ran only 35 tests and claimed zero fin
 | **F-06** | **MEDIUM** | Vector 4 | Date Sniffing Hang on Giant Text Cells | `pd.to_datetime(format="mixed")` ran mixed regexes on 30MB cells | Fast-path check: string length $> 100$ skips date inference | **VERIFIED FIXED** |
 | **F-07** | **HIGH** | Vector 1 | Module-Level In-Memory Dataset Retention | In-memory `DATA_STORE` retained uploaded DataFrames across requests indefinitely | Removed `DATA_STORE`, guaranteed ephemeral dereferencing and garbage collection | **VERIFIED FIXED** |
 | **F-08** | **MEDIUM** | Vector 5 | Upload Signature Bypass on Canonical Route | Magic byte and executable binary checks ran on inference endpoints but were missing on `/api/v1/upload` | Enforce `check_dangerous_and_magic_bytes` across all upload paths; preserve HTTP status codes | **VERIFIED FIXED** |
+| **F-09** | **MEDIUM** | Vector 4 | Ingress Body Size Guard Bypass (Pre-Read Buffering Spike) | Removal of legacy `size_guard` middleware allowed oversized request bodies to be fully buffered in RAM prior to size checking | ASGI `BodyLimitMiddleware` rejects `Content-Length > MAX_INGRESS_BODY_BYTES` immediately in ~5 ms (delta RSS +0.00 MB); capped `file.read()` | **VERIFIED FIXED** |
+| **F-10** | **MEDIUM** | Vector 1 | Starlette Temp File Spooling on Uploads > 1 MB (Spec Conflict) | Starlette `MultiPartParser` spools uploads $> 1\text{ MB}$ to OS temporary files via `SpooledTemporaryFile`; files deleted at request close | Measured rollovers and RSS (single +49.8 MB, 4 concurrent +198.0 MB under 55 MB in-memory spool). Per D-S1 (TBD), runtime unchanged | **MEASURED & REPORTED (STATUS TBD)** |
 
 ---
 
@@ -376,5 +378,198 @@ A mechanical AST and symbol scan was conducted across all module-level scopes in
 
 ### 7.3. Test Suite Verification
 - Added 18 regression tests in `backend/tests/test_upload_endpoint.py` covering spoofed ELF/PE/Mach-O as `.txt`, `.md`, `.csv`, shebang scripts, spoofed `.pdf`/`.docx`/`.doc`/`.xlsx`, valid ZIP non-workbooks (422), missing/disallowed extensions (415), real dataset fixtures (200), and large multi-row in-memory 50MB+1 byte payloads (413).
+
+---
+
+## 8. Addendum: Ingress Body Limit Hardening & Early Rejection (F-09)
+
+### 8.1. Finding Summary & Classification
+
+- **Finding ID**: **F-09**
+- **Severity**: **MEDIUM** (Unconstrained Ingress Buffering / Pre-Parse Memory & IO Exhaustion)
+- **Vector**: **Vector 2: Memory & Compute Exhaustion (Ingress Body Buffering)**
+- **Affected Endpoints**: `POST /api/v1/upload`, `POST /upload`, `POST /api/v1/forecast`, `POST /forecast`, `POST /api/v1/hypotheses`, `POST /hypotheses`, `POST /api/v1/segmentation`, `POST /segmentation`
+- **Root Cause**:
+  During earlier refactoring (commit `fd8dd22`), the legacy `size_guard` was removed in favor of a post-read size check inside route gatekeepers (`len(file_bytes) > UPLOAD_MAX_SIZE_BYTES`). Furthermore, `backend/main.py` performed an uncapped `await file.read()`. Consequently, when an oversized payload (such as a 120 MB multipart body) was uploaded, the ASGI pipeline (Starlette / python-multipart) buffered and processed the entire 120 MB before the route handler could inspect `len(file_bytes)` and raise HTTP 413. This resulted in an immediate +119.52 MB delta RSS spike (+243 MB under full parsing) and wasted significant CPU/IO cycles per request.
+- **Audit Verdict Status**:
+  **VERIFIED FIXED**. Implemented ASGI-layer `BodyLimitMiddleware` (`backend/src/middleware/body_limit.py`) mounted before `CORSMiddleware`, combined with capping the route handler's read to `await file.read(settings.UPLOAD_MAX_SIZE_BYTES + 1)`.
+
+### 8.2. Why Earlier Audits Missed It
+
+1. **Boundary Test Payload Sizing**: Earlier size-limit tests used payloads marginally above the ceiling (e.g. 50 MB + 1 byte). For a 50 MB payload, reading the extra byte into memory and rejecting it post-read produces a nearly identical memory footprint to an accepted 50 MB file, concealing the vulnerability.
+2. **Absence of Hostile Oversized Vectors**: Stress benchmarks tested malicious structures (decompression bombs, wide headers, long strings) within valid archive sizes, but did not measure the memory delta of sending streaming payloads 2x–3x the maximum size (e.g. 120 MB).
+
+### 8.3. Empirical Evidence & Resource Benchmarks
+
+Evaluated on **Windows 11 Home (win32, x64)** with **Python 3.14.3** using synthetic in-memory payloads (`io.BytesIO`, zero disk writes):
+
+| Payload & Workload | Enforcement Path | HTTP Status | Wall Time | Baseline RSS | Peak RSS | Delta RSS ($\Delta$) | Verdict |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
+| **120 MB Body (Pre-Fix)** | Post-read route gatekeeper | **413** | 0.928s | 447.46 MB | 566.98 MB | **+119.52 MB** | Vulnerable (Excessive Buffering) |
+| **120 MB Body (Post-Fix)** | ASGI `Content-Length` fast-path | **413** | **0.005s** | 447.38 MB | 447.39 MB | **+0.00 MB** | **FIXED (Instant Rejection)** |
+| **50 MB Valid CSV (Pre-Fix)** | Normal route parsing | **200** | 3.509s | 447.46 MB | 499.78 MB | +52.32 MB | Baseline Performance |
+| **50 MB Valid CSV (Post-Fix)** | Normal route parsing | **200** | **3.033s** | 447.38 MB | 497.15 MB | +49.77 MB | **Preserved Performance** |
+
+### 8.4. Remediation Implementation Details
+
+1. **ASGI `BodyLimitMiddleware`**:
+   - Location: `backend/src/middleware/body_limit.py`, mounted in `backend/main.py`.
+   - **Fast Path**: Inspects `Content-Length` header. If `int(content_length) > MAX_INGRESS_BODY_BYTES` (50 MB + 64 KB multipart framing allowance), it immediately returns HTTP 413 with `{"detail": "File exceeds the 50MB limit..."}` without reading any body bytes.
+   - **Streaming / Chunked Path**: Wraps `receive()` to aggregate chunk byte counts. As soon as accumulated bytes exceed `MAX_INGRESS_BODY_BYTES`, it returns HTTP 413 and aborts the connection.
+2. **Capped Read in Route Handler**:
+   - Modified `upload()` in `backend/main.py` from `await file.read()` to `await file.read(settings.UPLOAD_MAX_SIZE_BYTES + 1)`, ensuring parity with `backend/src/api/analytics_router.py`.
+3. **ASGI Exception Handling Hardening**:
+   - Converted `RateLimiterPlaceholderMiddleware` in `backend/main.py` from Starlette's `BaseHTTPMiddleware` to a pure ASGI middleware (`__call__(scope, receive, send)`), eliminating AnyIO `ExceptionGroup` wrapping on streaming receive exceptions so FastAPI's exception handler can process aborts cleanly.
+4. **Test Verification**:
+   - Added `backend/tests/test_oversized.py` with 5 targeted tests verifying fast-path rejection, chunked streaming byte cap, exact 50 MB / 50 MB + 1 byte boundaries, 120 MB memory boundedness, and multipart ordering with trailing fields.
+
+---
+
+## 9. Addendum: Starlette Ingress Spooling Measurement (F-10)
+
+### 9.1. Finding Summary & Classification
+
+- **Finding ID**: **F-10**
+- **Severity**: **MEDIUM** (Spec Conflict: Starlette Ingress Disk Spooling on Uploads > 1 MB)
+- **Vector**: **Vector 1: Zero Disk Persistence vs OS Spooling**
+- **Affected Endpoints**: `POST /api/v1/upload`, `POST /upload`, `POST /api/v1/forecast`, `POST /forecast`, `POST /api/v1/hypotheses`, `POST /hypotheses`, `POST /api/v1/segmentation`, `POST /segmentation`
+- **Root Cause**:
+  Starlette's `MultiPartParser` instantiates `tempfile.SpooledTemporaryFile(max_size=spool_max_size)` for incoming file streams, where `spool_max_size` defaults to 1 MB (`1024 * 1024` bytes). Any file upload exceeding 1 MB triggers `SpooledTemporaryFile.rollover()`, which creates an OS-level temporary file on disk (in `%TEMP%` on Windows or `/tmp` on Linux). While the file is deleted upon request completion, this transient disk write conflicts with Master Spec §1.1 ("zero disk persistence; all processing in-memory").
+- **Audit Verdict Status**:
+  **MEASURED & REPORTED (Decision D-S1: TBD)**. Per project decision rules, runtime configuration is preserved unchanged.
+
+### 9.2. Why Earlier Audits Missed It
+
+Earlier audit tests inspected `os.listdir(tempfile.gettempdir())` *after* the HTTP response had been returned. Because Starlette's `UploadFile.close()` immediately closes and unlinks the `SpooledTemporaryFile`, post-request file listings showed 0 lingering files, creating the impression that no disk writes occurred during the request.
+
+### 9.3. Empirical Evidence & Spooling Measurements
+
+#### 9.3.1. Rollover Hook Verification Across Upload Sizes
+Measured by observing `tempfile.SpooledTemporaryFile.rollover` invocation and active OS file presence:
+
+| Upload Size | Rollover Invocations | Active OS Temp File During Request? | Active OS Temp File Post-Request? |
+| :---: | :---: | :---: | :---: |
+| **0.5 MB** | 0 | False | False |
+| **1.0 MB** | 0 | False | False |
+| **2.0 MB** | 1 | True (`~RF*.tmp`) | False (unlinked upon completion) |
+| **10.0 MB** | 1 | True (`~RF*.tmp`) | False (unlinked upon completion) |
+| **50.0 MB** | 1 | True (`~RF*.tmp`) | False (unlinked upon completion) |
+
+#### 9.3.2. Peak RSS & Concurrency Table (Default 1 MB Spool vs 55 MB In-Memory Spool)
+
+Evaluated with 50 MB synthetic CSV payloads across single and 4-way concurrent uploads (`asyncio`, pure `io.BytesIO` client buffers):
+
+| Workload | Spooling Setting | Wall Time | Baseline RSS | Peak RSS | Delta RSS ($\Delta$) | Temp File Created? |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| **Single 50 MB Upload** | Default Spool (1 MB) | 4.532s | 447.38 MB | 500.96 MB | +53.58 MB | Yes (unlinked on close) |
+| **Single 50 MB Upload** | In-Memory (55 MB spool) | 5.011s | 447.38 MB | 497.15 MB | +49.77 MB | No (pure RAM) |
+| **4 Concurrent 50 MB Uploads** | Default Spool (1 MB) | 25.576s | 447.38 MB | 654.49 MB | +207.11 MB | Yes (4 temp files) |
+| **4 Concurrent 50 MB Uploads** | In-Memory (55 MB spool) | 24.773s | 447.38 MB | 645.40 MB | +198.02 MB | No (pure RAM) |
+
+### 9.4. Spec Conflict Resolution & Decision D-S1
+
+1. **Trade-off Analysis**:
+   - Setting `MultiPartParser.spool_max_size = 55 * 1024 * 1024` eliminates all OS disk writes, achieving literal zero-disk compliance.
+   - However, in-memory spooling requires each concurrent upload to buffer 50 MB in RAM. Under 4 concurrent uploads, peak RSS reaches ~645 MB, which exceeds strict 512 MB container tiers (e.g. Render free tier).
+2. **Current Decision**:
+   - Per Decision D-S1 (**TBD**), the default 1 MB spool is preserved in production code.
+   - Once confirmed, the project may either:
+     - **Option A**: Clarify Master Spec §1.1 to explicitly permit transient OS spooling for uploads $> 1$ MB with guaranteed ephemeral unlinking.
+     - **Option B**: Adopt 55 MB in-memory spooling paired with an upload concurrency semaphore (concurrency limit $\le 2$).
+
+---
+
+## 10. Model Loader & Runtime Architecture Verification (WS-D)
+
+### 10.1. Raw Grep Outputs
+
+Execution of mechanical source searches across the backend codebase:
+
+```bash
+$ git grep -n "_load_engine" -- backend
+# (Returns 0 matches - exit code 1)
+
+$ git grep -n "joblib" -- backend/src backend/main.py
+backend/src/training/train_engine_a_forecasting.py:12:import joblib
+backend/src/training/train_engine_a_forecasting.py:321:    joblib.dump(artifact, output_path, compress=3)
+backend/src/training/train_engine_b_clustering.py:10:import joblib
+backend/src/training/train_engine_b_clustering.py:279:    joblib.dump(artifact, output_path, compress=3)
+```
+
+### 10.2. Corrected Architecture Statement
+
+- **Verification of Prior Claims**: Prior audit draft notes contained conflicting statements regarding model loading: one suggested that serialized `.joblib` model artifacts were loaded in `backend/main.py` via `_load_engine()`, while another stated no loader calls existed.
+- **Definitive Finding**: The statement that **no runtime model loaders exist in `backend/main.py` or `backend/src/`** is 100% correct.
+- **Runtime Inference Architecture**:
+  - The live analytics endpoints (`/api/v1/forecast`, `/api/v1/segmentation`, `/api/v1/hypotheses`) do **not** load pre-trained `.joblib` models from `backend/models/`.
+  - Instead, the Foresight platform operates via **dynamic, on-the-fly model fitting and inference on the uploaded tabular dataset**:
+    - `forecast_engine.py`: Dynamically trains Ridge and XGBoost regressors on chronological holdout folds of the submitted time series.
+    - `outlier_engine.py`: Dynamically fits KMeans, PCA, and Isolation Forest models on a deterministic 10,000-row sample of the uploaded dataset, and scores the entire dataset.
+  - The serialized artifacts in `backend/models/*.joblib` are produced exclusively by the offline training scripts (`backend/src/training/`) during pipeline validation to audit artifact footprint limits (Spec §5.2).
+
+---
+
+## 11. Route Deduplication & Alias Governance (WS-C)
+
+### 11.1. Route Table Audit & Answering Handler Verification
+
+Execution of route greps:
+```bash
+$ git grep -n "segmentation" -- backend/src/api/analytics_router.py backend/src/api/segmentation.py backend/main.py
+backend/src/api/analytics_router.py:158:@router.post(
+backend/src/api/analytics_router.py:161:async def segmentation_endpoint(
+backend/src/api/analytics_router.py:173:    from src.api.segmentation import segmentation as seg_handler
+backend/src/api/analytics_router.py:175:    return await seg_handler(file, k, contamination, random_state)
+backend/src/api/segmentation.py:38:@router.post(
+backend/src/api/segmentation.py:41:async def segmentation(
+backend/main.py:17:from src.api.segmentation import router as segmentation_router, root_router as root_segmentation_router
+backend/main.py:102:app.include_router(segmentation_router, prefix="/api/v1")
+backend/main.py:104:app.include_router(root_segmentation_router, prefix="")
+```
+
+- **Router Inclusion Order in `backend/main.py`**:
+  1. `analytics_router` (prefix: `/api/v1`)
+  2. `root_analytics_router` (prefix: `""`)
+  3. `segmentation_router` (prefix: `/api/v1`)
+  4. `root_segmentation_router` (prefix: `""`)
+- **Handler Verification**:
+  Both route registrations pointed directly to the exact same audited implementation function: `src.api.segmentation.segmentation`.
+  Because `analytics_router` was mounted first, its forwarding wrapper answered requests to `/api/v1/segmentation`, while `segmentation_router` registered a shadowed duplicate.
+- **Remediation**:
+  Removed the redundant duplicate route definition from `backend/src/api/analytics_router.py` (lines 158–176).
+  Added an automated invariant test in `backend/tests/test_spooling_and_routes.py` that fails if any two routes share the same `(method, path)` in `app.routes`.
+
+### 11.2. Root-Level Aliases and Documentation Endpoints
+
+The application currently exposes the following 13 active routes:
+
+| HTTP Method | Route Path | Handler Function | Purpose / Classification | Phase 5 Deprecation Recommendation |
+| :--- | :--- | :--- | :--- | :--- |
+| `POST` | `/api/v1/upload` | `backend/main.py:upload()` | Canonical file ingestion | **Preserve** (Core API) |
+| `POST` | `/upload` | `backend/main.py:upload_root()` | Legacy root upload alias | **Deprecate in Phase 5** in favor of `/api/v1/upload` |
+| `POST` | `/api/upload` | `backend/main.py:upload_api()` | Legacy api upload alias | **Deprecate in Phase 5** in favor of `/api/v1/upload` |
+| `GET` | `/health` | `backend/main.py:health()` | Container health check | **Preserve** (Operational Liveness) |
+| `POST` | `/api/v1/forecast` | `analytics_router:forecast()` | Canonical forecasting API | **Preserve** (Core API) |
+| `POST` | `/forecast` | `analytics_router:forecast()` | Legacy root forecast alias | **Deprecate in Phase 5** in favor of `/api/v1/forecast` |
+| `POST` | `/api/v1/hypotheses` | `analytics_router:hypotheses()` | Canonical hypothesis API | **Preserve** (Core API) |
+| `POST` | `/hypotheses` | `analytics_router:hypotheses()` | Legacy root hypothesis alias | **Deprecate in Phase 5** in favor of `/api/v1/hypotheses` |
+| `POST` | `/api/v1/segmentation` | `segmentation:segmentation()` | Canonical segmentation API | **Preserve** (Core API) |
+| `POST` | `/segmentation` | `segmentation:segmentation()` | Legacy root segmentation alias | **Deprecate in Phase 5** in favor of `/api/v1/segmentation` |
+| `GET` | `/docs` | Starlette / OpenAPI | Swagger UI Documentation | Preserve (Development / Staging) |
+| `GET` | `/redoc` | Starlette / OpenAPI | ReDoc UI Documentation | Preserve (Development / Staging) |
+| `GET` | `/openapi.json` | Starlette / OpenAPI | OpenAPI JSON Specification | Preserve (API Schema Contract) |
+
+---
+
+## 12. Local-Path & Credential Scan Findings (WS-D)
+
+Execution of workspace path scans:
+- **`git grep -n "C:\\Users" -- . ":!.agents"`**:
+  Found 11 occurrences across 8 test and benchmark files (`test_fit_cap_and_tiers.py`, `test_preparse_limits_consistency.py`, `test_resource_bounds_evidence.py`, `test_shared_sanitizer_regression.py`, `test_xlsx_expansion_evidence.py`, `measure_resource_bounds.py`, `measure_xlsx_expansion.py`, `rebenchmark_phase3b.py`). All instances are print statements or local temporary directory references in test runners.
+  **0 occurrences** found in tracked markdown documentation, architectural reports, or configuration files.
+- **`git grep -n "D:\\Foresight" -- . ":!.agents"`**:
+  Found exactly 1 occurrence in `docs/PHASE_EXECUTION_LOG.md:6` (`**Repository**: d:\Foresight`). Redacted to `**Repository**: <WORKSPACE_ROOT>`.
+- **Verdict**: Zero local home paths, usernames, or secrets remain exposed in project documentation or configuration.
+
 
 

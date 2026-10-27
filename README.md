@@ -1209,3 +1209,37 @@ A systematic read-only audit of the 10 chart tokens against the backend response
     - `pytest backend/tests/ -m latency`: **11 passed, 428 deselected in 58.86s**.
     - Frontend unit tests (`npm test` in `frontend/`): **3 test suites passed, 76 passed, 0 failed in 9.55s**.
     - Frontend type check (`npx tsc --noEmit` in `frontend/`): **Clean exit, 0 errors**.
+
+## Update 2026-10-27 (Phase 4 Task 1b: Ingress Body Limits, Spooling Measurement, Route Deduplication & Loader Audit)
+- **Task**: Phase 4 Task 1b Ingress Body Limits, Spooling Measurement, Route Deduplication, and Loader Verification.
+- **Environment**: OS = Windows 11 Home (win32, x64, 10.0.26300), Python = 3.14.3.
+- **Architectural & Security Remediations**:
+  - **F-09 (ASGI Ingress Body Limit & Early Rejection)**:
+    - Added `BodyLimitMiddleware` (`backend/src/middleware/body_limit.py`) mounted at ASGI layer before `CORSMiddleware`.
+    - Enforces `MAX_INGRESS_BODY_BYTES = 50 MB + 64 KB` multipart framing allowance via fast-path `Content-Length` inspection (< 5 ms rejection with 0 MB RSS spike for 120 MB payloads).
+    - Wraps `receive()` for chunked streaming to count bytes and abort at the boundary.
+    - Capped bare `await file.read()` in `backend/main.py:upload()` to `UPLOAD_MAX_SIZE_BYTES + 1`.
+    - Converted `RateLimiterPlaceholderMiddleware` in `backend/main.py` from `BaseHTTPMiddleware` to pure ASGI middleware to prevent AnyIO `ExceptionGroup` wrapping on streaming receive exceptions.
+  - **F-10 (Starlette Spooling Measurement & Concurrency Analysis)**:
+    - Verified rollover mechanics: uploads $\le 1$ MB remain in RAM; uploads $> 1$ MB trigger `SpooledTemporaryFile.rollover()`, creating temporary OS files during request parsing (unlinked on finish).
+    - Measured single 50 MB upload RSS: +53.58 MB under 1 MB spool vs +49.77 MB under 55 MB spool.
+    - Measured 4 concurrent 50 MB uploads RSS: +207.11 MB (654.49 MB peak) under 1 MB spool vs +198.02 MB (645.40 MB peak) under 55 MB spool.
+    - Preserved production runtime configuration at default 1 MB spool per Decision D-S1 (**TBD**).
+  - **WS-C (Route Table Deduplication & Alias Governance)**:
+    - Audited duplicate `/api/v1/segmentation` registration across `analytics_router.py` and `segmentation.py`. Confirmed both pointed to `src.api.segmentation.segmentation`.
+    - Removed redundant route handler from `backend/src/api/analytics_router.py` (lines 158–176).
+    - Added duplicate route invariant test in `backend/tests/test_spooling_and_routes.py`.
+    - Documented root-level aliases (`/forecast`, `/hypotheses`, `/segmentation`, `/upload`, `/api/upload`, `/health`) and documentation endpoints with Phase 5 deprecation recommendations.
+  - **WS-D (Loader Claim & Path Scan)**:
+    - Ran raw greps: `_load_engine` returned 0 matches; `joblib` returned 4 matches exclusively in `backend/src/training/`.
+    - Verified that live inference routes execute dynamic in-memory training and scoring on uploaded data; no pre-trained `.joblib` models are loaded at runtime.
+    - Scanned local paths and redacted workspace root references from documentation.
+- **Test Arithmetic & Verification**:
+  - Baseline before Task 1b: 439 tests.
+  - Added tests (+10):
+    - `backend/tests/test_oversized.py`: +5 tests (fast-path rejection, chunked streaming byte cap, exact 50 MB / 50 MB + 1 byte boundaries, 120 MB memory boundedness, and multipart ordering with trailing fields).
+    - `backend/tests/test_spooling_and_routes.py`: +5 tests (verifying duplicate route prohibition, audited handler mapping, root alias preservation, and spool threshold mechanics).
+  - Suite Total: **449 passed, 0 failed, 0 skipped, 0 xfailed**.
+  - Latency suite: **11 passed** in isolation.
+  - Frontend suite: **76 passed**, `tsc --noEmit` exited code 0.
+

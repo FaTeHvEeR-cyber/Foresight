@@ -3,7 +3,8 @@
 **Document Owner**: Agent 5 — Docs & Tracker  
 **Scope**: Project-wide execution status, exit-gate audits, security controls, architectural decisions, and next-phase transition roadmaps.  
 **Last Certified Run**: 2026-09-20T22:13:30+05:30  
-**Repository**: `d:\Foresight`
+**Repository**: `<WORKSPACE_ROOT>`
+
 
 ---
 
@@ -301,6 +302,46 @@ Agent Split:
   - Added tests (+25): `test_upload_endpoint.py` (+18), `test_oversized.py` (+1), `test_consolidation_invariants.py` (+4), `test_zero_retention.py` (+2).
   - Total: **439 passed, 0 failed in 401.79s**.
 - **Model Artifact Footprint**: 2.53 MB total across 10 artifacts (5.1% of 50.0 MB ceiling).
+
+---
+
+## 13. Phase 4 Task 1b: Ingress Body Limits, Spooling Measurement, Route Deduplication & Loader Audit
+
+- **Environment**: OS = Windows 11 Home (win32, x64), Python = 3.14.3.
+- **Goal**: Remediate unconstrained body buffering on file uploads (Finding F-09), measure Starlette disk spooling and concurrent RSS (Finding F-10, Decision D-S1), deduplicate `/api/v1/segmentation` route in `analytics_router.py`, audit runtime model loader claims, and redact local paths from documentation.
+- **Architectural & Security Remediations**:
+  - **F-09 (ASGI Ingress Body Limit & Early Rejection)**:
+    - Added `BodyLimitMiddleware` (`backend/src/middleware/body_limit.py`) mounted at the ASGI layer before `CORSMiddleware`.
+    - Enforces `MAX_INGRESS_BODY_BYTES = 50 MB + 64 KB` multipart framing allowance via fast-path `Content-Length` header inspection (< 5 ms rejection with 0 MB RSS spike for 120 MB payloads).
+    - Wraps `receive()` for streaming chunked uploads to aggregate bytes and abort at the boundary.
+    - Capped bare `await file.read()` in `upload()` to `UPLOAD_MAX_SIZE_BYTES + 1`.
+    - Converted `RateLimiterPlaceholderMiddleware` in `backend/main.py` from `BaseHTTPMiddleware` to pure ASGI middleware to prevent AnyIO `ExceptionGroup` wrapping on streaming receive exceptions.
+  - **F-10 (Starlette Spooling Measurement & Concurrency Analysis)**:
+    - Verified rollover mechanics: uploads $\le 1$ MB remain in-memory; uploads $> 1$ MB trigger `SpooledTemporaryFile.rollover()`, creating temporary OS files during the request (unlinked on finish).
+    - Measured single 50 MB upload RSS: +53.58 MB under 1 MB spool vs +49.77 MB under 55 MB spool.
+    - Measured 4 concurrent 50 MB uploads RSS: +207.11 MB (654.49 MB peak) under 1 MB spool vs +198.02 MB (645.40 MB peak) under 55 MB spool.
+    - Status: D-S1 is **TBD**; production runtime configuration preserved at default 1 MB spool.
+  - **WS-C (Route Table Deduplication)**:
+    - Audited duplicate `/api/v1/segmentation` registration across `analytics_router.py` and `segmentation.py`. Confirmed both pointed to `src.api.segmentation.segmentation`.
+    - Removed redundant route handler from `backend/src/api/analytics_router.py` (lines 158–176).
+    - Added duplicate route invariant test in `backend/tests/test_spooling_and_routes.py`.
+    - Documented root-level aliases (`/forecast`, `/hypotheses`, `/segmentation`, `/upload`, `/api/upload`, `/health`) and documentation endpoints with Phase 5 deprecation recommendations.
+  - **WS-D (Loader Claim & Path Scan)**:
+    - Ran raw greps: `_load_engine` returned 0 matches; `joblib` returned 4 matches exclusively in `backend/src/training/`.
+    - Verified that live inference routes execute dynamic in-memory training and scoring on uploaded data; no pre-trained `.joblib` models are loaded at runtime.
+    - Redacted local repository paths in documentation (`<WORKSPACE_ROOT>`).
+- **Test Arithmetic**:
+  - Baseline from Task 1: 439 passed.
+  - Added tests (+10):
+    - `backend/tests/test_oversized.py`: +5 tests (verifying fast-path rejection, chunked abort, 50MB boundary, 120MB RSS boundedness, and multipart ordering).
+    - `backend/tests/test_spooling_and_routes.py`: +5 tests (verifying duplicate route prohibition, audited handler mapping, root alias preservation, and spool threshold mechanics).
+  - Suite Total: **449 passed, 0 failed, 0 skipped, 0 xfailed**.
+  - Latency suite: **11 passed** in isolation.
+  - Frontend suite: **76 passed**, `tsc --noEmit` exited code 0.
+- **Commits**:
+  - `cabf4dc`: `fix(upload): reject oversized bodies before reading them (F-09)`
+  - `a39f2c9`: `test(security): spooling measurement and duplicate-route invariant`
+
 
 
 
