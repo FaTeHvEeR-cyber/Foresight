@@ -51,20 +51,25 @@ TABULAR_EXTENSIONS = {"csv", "tsv", "xlsx", "xls", "parquet"}
 DOCUMENT_EXTENSIONS = {"pdf", "docx", "txt", "md"}
 
 
-class RateLimiterPlaceholderMiddleware(BaseHTTPMiddleware):
+class RateLimiterPlaceholderMiddleware:
     """Placeholder rate-limiting middleware.
 
     Checks `settings.ENABLE_RATE_LIMITING` and no-ops if False,
     ensuring it is inert during Phases 2-4 and will not throttle local dev/testing.
+    Implemented as a pure ASGI middleware to prevent BaseHTTPMiddleware task group wrapping.
     """
 
-    async def dispatch(self, request: Request, call_next) -> Response:
+    def __init__(self, app: Any):
+        self.app = app
+
+    async def __call__(self, scope: Dict[str, Any], receive: Any, send: Any) -> None:
         if not settings.ENABLE_RATE_LIMITING:
             # Inert placeholder — no-op
-            return await call_next(request)
+            await self.app(scope, receive, send)
+            return
 
         # Rate limiting logic scaffold (deferred to Phase 5)
-        return await call_next(request)
+        await self.app(scope, receive, send)
 
 
 app = FastAPI(
@@ -73,10 +78,15 @@ app = FastAPI(
     version="0.2.0",
 )
 
+from src.middleware.body_limit import BodyLimitMiddleware
+
 # 1. Rate Limiting Middleware (inert placeholder)
 app.add_middleware(RateLimiterPlaceholderMiddleware)
 
-# 2. CORS Middleware allowing Next.js frontend origin
+# 2. Ingress Body Limit Middleware (F-09 early rejection)
+app.add_middleware(BodyLimitMiddleware)
+
+# 3. CORS Middleware allowing Next.js frontend origin
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -152,8 +162,8 @@ async def upload(file: Optional[UploadFile] = File(None)):
         doc_text = None
 
         try:
-            # 1. Read the uploaded file into bytes via io.BytesIO (no disk writes)
-            raw_contents = await file.read()
+            # 1. Read the uploaded file into bytes via io.BytesIO (capped read as backstop, no disk writes)
+            raw_contents = await file.read(settings.UPLOAD_MAX_SIZE_BYTES + 1)
             file_io = io.BytesIO(raw_contents)
             file_bytes = file_io.getvalue()
 

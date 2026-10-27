@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     # Guardrails
     MAX_FILE_SIZE_MB: int = 50
     UPLOAD_MAX_SIZE_BYTES: int = 50 * 1024 * 1024
+    MULTIPART_FRAMING_ALLOWANCE_BYTES: int = 64 * 1024
+    MAX_INGRESS_BODY_BYTES: int = 50 * 1024 * 1024 + 64 * 1024
 
     # Pre-parse Resource Limits & Guardrails (Phase 3B - Single Source of Truth)
     MAX_PARQUET_ROWS: int = 1_000_000
@@ -157,4 +159,6 @@ MAX_XLSX_SHEETS: int = settings.MAX_XLSX_SHEETS
 MAX_COLUMNS: int = settings.MAX_COLUMNS
 MAX_FIELD_LENGTH_BYTES: int = settings.MAX_FIELD_LENGTH_BYTES
 XLSX_EXPANSION_RATIO_GUARD: int = settings.XLSX_EXPANSION_RATIO_GUARD
+MULTIPART_FRAMING_ALLOWANCE_BYTES: int = settings.MULTIPART_FRAMING_ALLOWANCE_BYTES
+MAX_INGRESS_BODY_BYTES: int = settings.MAX_INGRESS_BODY_BYTES
 

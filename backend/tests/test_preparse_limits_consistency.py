@@ -34,6 +34,8 @@ def test_settings_is_single_source_of_truth_for_limits():
     assert settings.MAX_COLUMNS == 10_000
     assert settings.MAX_FIELD_LENGTH_BYTES == 10 * 1024 * 1024
     assert settings.XLSX_EXPANSION_RATIO_GUARD == 100
+    assert settings.MULTIPART_FRAMING_ALLOWANCE_BYTES == 64 * 1024
+    assert settings.MAX_INGRESS_BODY_BYTES == 50 * 1024 * 1024 + 64 * 1024
 
 
 def test_single_field_cap_reconciled_between_preparse_and_parser():
