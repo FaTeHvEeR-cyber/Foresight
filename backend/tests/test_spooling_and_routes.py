@@ -61,6 +61,27 @@ def test_no_duplicate_method_and_path_routes():
 
 
 
+def test_exact_post_routes_allowlist():
+    """Verify that the exact literal set of POST routes in app matches the audited allow-list."""
+    routes = _get_flattened_routes()
+    post_routes = sorted({p for m, p, _ in routes if m == "POST"})
+    expected_post_routes = sorted([
+        "/api/v1/forecast",
+        "/api/v1/hypotheses",
+        "/api/v1/segmentation",
+        "/api/v1/upload",
+        "/forecast",
+        "/hypotheses",
+        "/segmentation",
+    ])
+    assert post_routes == expected_post_routes, (
+        f"Route table POST allow-list mismatch. Found {post_routes}, expected {expected_post_routes}"
+    )
+    # Assert legacy aliases remain absent
+    assert "/upload" not in post_routes, "Legacy alias /upload must not exist in POST routes"
+    assert "/api/upload" not in post_routes, "Legacy alias /api/upload must not exist in POST routes"
+
+
 def test_segmentation_routes_point_to_audited_handler():
     """Verify that POST /api/v1/segmentation and POST /segmentation point to audited segmentation handler."""
     routes = _get_flattened_routes()

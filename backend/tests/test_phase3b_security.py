@@ -32,7 +32,7 @@ import pandas as pd
 import pytest
 from starlette.testclient import TestClient
 
-from config.settings import Settings, get_settings
+from config.settings import Settings, get_settings, settings
 from main import app
 from src.orchestrator.chart_picker import ALLOWED, pick_chart
 from src.parsers.sanitization import (
@@ -173,8 +173,9 @@ class TestVector1EphemeralRAM:
                 assert res_500.status_code == 500
                 assert mock_gc.called, "gc.collect() not called on 500 error path"
 
-    def test_segmentation_concurrency_and_memory_isolation(self):
+    def test_segmentation_concurrency_and_memory_isolation(self, monkeypatch):
         """Fire 20 concurrent requests with distinct payloads; check state isolation and RAM return."""
+        monkeypatch.setattr(settings, "MAX_CONCURRENT_UPLOADS", 25)
         gc.collect()
 
         def _make_request(req_id: int) -> dict:
