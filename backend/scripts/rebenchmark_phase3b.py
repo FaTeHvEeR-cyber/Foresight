@@ -56,15 +56,22 @@ def get_peak_rss_mb() -> float:
         return pmc.PeakWorkingSetSize / (1024 * 1024)
     return 0.0
 
-DATASET_CANDIDATES = [
-    Path(r"C:\Users\rfate\Desktop\report\project\Project - 2\Datasets\phase-3A"),
-    Path(r"C:\Users\rfate\Desktop\report\project\Project - 2\Datasets"),
-    BACKEND_DIR / "data",
-    BACKEND_DIR.parent / "data",
-]
+import os
+
+def _get_dataset_candidates() -> list[Path]:
+    candidates: list[Path] = []
+    env_dir = os.environ.get("FORESIGHT_DATA_DIR")
+    if env_dir:
+        p = Path(env_dir)
+        candidates.extend([p, p / "phase-3A", p.parent, p.parent / "phase-3A"])
+    candidates.extend([
+        BACKEND_DIR / "data",
+        BACKEND_DIR.parent / "data",
+    ])
+    return candidates
 
 def find_dataset(*names: str) -> Path | None:
-    for base in DATASET_CANDIDATES:
+    for base in _get_dataset_candidates():
         for n in names:
             p = base / n
             if p.exists():

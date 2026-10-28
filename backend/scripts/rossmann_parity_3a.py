@@ -37,12 +37,25 @@ PHASE2_5_PROMO_LIFT_TOL: float = 2.00     # +/- 2.0% tolerance
 PHASE2_5_RIDGE_GATE_RMSPE: float = 20.00  # 20.0% Ridge gate parity threshold
 PHASE2_5_GLOBAL_XGB_RMSPE: float = 11.90  # 11.9% global pooled XGBoost reference
 
-DEFAULT_CANDIDATE_PATHS: List[Path] = [
-    Path(r"C:\Users\rfate\Desktop\report\project\Project - 2\Datasets\Rossman\train.csv"),
-    backend_dir / "data" / "rossmann_train.csv",
-    backend_dir.parent / "data" / "rossmann_train.csv",
-    Path("data/rossmann_train.csv"),
-]
+import os
+
+def _get_rossmann_candidates() -> List[Path]:
+    candidates: List[Path] = []
+    env_dir = os.environ.get("FORESIGHT_DATA_DIR")
+    if env_dir:
+        p = Path(env_dir)
+        candidates.extend([
+            p / "Rossman" / "train.csv",
+            p / "train.csv",
+            p / "rossmann_train.csv",
+            p.parent / "Rossman" / "train.csv",
+        ])
+    candidates.extend([
+        backend_dir / "data" / "rossmann_train.csv",
+        backend_dir.parent / "data" / "rossmann_train.csv",
+        Path("data/rossmann_train.csv"),
+    ])
+    return candidates
 
 
 def resolve_rossmann_dataset(override_path: Optional[str] = None) -> Path:
@@ -53,12 +66,14 @@ def resolve_rossmann_dataset(override_path: Optional[str] = None) -> Path:
             return p.resolve()
         raise FileNotFoundError(f"Specified Rossmann dataset path does not exist: {override_path}")
 
-    for candidate in DEFAULT_CANDIDATE_PATHS:
+    candidates = _get_rossmann_candidates()
+    for candidate in candidates:
         if candidate.is_file():
             return candidate.resolve()
 
     raise FileNotFoundError(
-        f"Rossmann train.csv not found across candidate paths: {[str(c) for c in DEFAULT_CANDIDATE_PATHS]}"
+        f"Rossmann train.csv not found across candidate paths: {[str(c) for c in candidates]}. "
+        "Set FORESIGHT_DATA_DIR environment variable to the dataset directory."
     )
 
 

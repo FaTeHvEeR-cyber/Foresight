@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import gc
 import io
+import os
 import statistics
 import time
 from pathlib import Path
@@ -41,21 +42,27 @@ from src.orchestrator.chart_picker import heuristic_pick
 
 client = TestClient(app)
 
-DATASET_CANDIDATES = [
-    Path(r"C:\Users\rfate\Desktop\report\project\Project - 2\Datasets\phase-3A"),
-    Path(r"C:\Users\rfate\Desktop\report\project\Project - 2\Datasets"),
-    Path(__file__).resolve().parents[1] / "data",
-    Path(__file__).resolve().parents[2] / "data",
-]
+def _get_dataset_candidates() -> list[Path]:
+    candidates: list[Path] = []
+    env_dir = os.environ.get("FORESIGHT_DATA_DIR")
+    if env_dir:
+        p = Path(env_dir)
+        candidates.extend([p, p / "phase-3A", p.parent, p.parent / "phase-3A"])
+    backend_dir = Path(__file__).resolve().parents[1]
+    candidates.extend([
+        backend_dir / "data",
+        backend_dir.parent / "data",
+    ])
+    return candidates
 
 
 def _get_dataset_path(*filenames: str) -> Path:
-    for base in DATASET_CANDIDATES:
+    for base in _get_dataset_candidates():
         for fname in filenames:
             p = base / fname
             if p.exists():
                 return p
-    pytest.skip(f"Benchmark dataset {filenames!r} not found in candidate paths.")
+    pytest.skip(f"Benchmark dataset {filenames!r} not found in candidate paths. Set FORESIGHT_DATA_DIR environment variable.")
 
 
 def _to_csv_bytes(df: pd.DataFrame) -> bytes:

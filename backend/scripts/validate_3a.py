@@ -31,20 +31,30 @@ from src.analytics.loader import load_tabular
 
 client = TestClient(app)
 
-DATASET_CANDIDATES = [
-    Path(r"C:\Users\rfate\Desktop\report\project\Project - 2\Datasets\phase-3A"),
-    BACKEND_DIR / "data",
-    BACKEND_DIR.parent / "data",
-]
+def _get_dataset_candidates() -> List[Path]:
+    candidates: List[Path] = []
+    env_dir = os.environ.get("FORESIGHT_DATA_DIR")
+    if env_dir:
+        p = Path(env_dir)
+        candidates.extend([p, p / "phase-3A", p.parent, p.parent / "phase-3A"])
+    candidates.extend([
+        BACKEND_DIR / "data",
+        BACKEND_DIR.parent / "data",
+    ])
+    return candidates
 
 
 def find_dataset(*filenames: str) -> Path:
-    for base in DATASET_CANDIDATES:
+    candidates = _get_dataset_candidates()
+    for base in candidates:
         for fname in filenames:
             p = base / fname
             if p.exists():
                 return p
-    raise FileNotFoundError(f"Could not find any of {filenames} in {DATASET_CANDIDATES}")
+    raise FileNotFoundError(
+        f"Could not find any of {filenames} in {candidates}. "
+        "Set FORESIGHT_DATA_DIR environment variable to the dataset directory."
+    )
 
 
 def calculate_latency_stats(timings: List[float]) -> Dict[str, Any]:

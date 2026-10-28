@@ -12,17 +12,26 @@ from sklearn.metrics import roc_auc_score, precision_recall_curve, auc, recall_s
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import IsolationForest
 
+import os
 from src.analytics.outlier_engine import run_segmentation
 
-DATASET_CANDIDATES = [
-    Path(r"C:\Users\rfate\Desktop\report\project\Project - 2\Datasets\phase-3A"),
-    Path(r"C:\Users\rfate\Desktop\report\project\Project - 2\Datasets"),
-    Path("data"),
-    Path("../data"),
-]
+def _get_dataset_candidates() -> list[Path]:
+    candidates: list[Path] = []
+    env_dir = os.environ.get("FORESIGHT_DATA_DIR")
+    if env_dir:
+        p = Path(env_dir)
+        candidates.extend([p, p / "phase-3A", p.parent, p.parent / "phase-3A"])
+    backend_dir = Path(__file__).resolve().parent.parent
+    candidates.extend([
+        backend_dir / "data",
+        backend_dir.parent / "data",
+        Path("data"),
+        Path("../data"),
+    ])
+    return candidates
 
 def get_path(*names):
-    for base in DATASET_CANDIDATES:
+    for base in _get_dataset_candidates():
         for n in names:
             p = base / n
             if p.exists():

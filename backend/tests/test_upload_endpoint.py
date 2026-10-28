@@ -1,6 +1,8 @@
 """Comprehensive unit & integration tests for POST /upload in main.py."""
 
 import io
+import os
+from pathlib import Path
 import pytest
 from starlette.testclient import TestClient
 
@@ -210,10 +212,16 @@ def test_regression_all_fixtures_return_200(
 
 def test_regression_real_datasets_return_200(client, wholesale_df, bike_df, retail_df):
     """Verify real benchmark datasets (Wholesale, Online Retail, Credit Card, Bike) return 200."""
-    candidate_paths = [
-        Path(r"C:\Users\rfate\Desktop\report\project\Project - 2\Datasets\phase-3A"),
-        Path(__file__).resolve().parents[1] / "data",
-    ]
+    candidate_paths: list[Path] = []
+    env_dir = os.environ.get("FORESIGHT_DATA_DIR")
+    if env_dir:
+        p = Path(env_dir)
+        candidate_paths.extend([p, p / "phase-3A", p.parent, p.parent / "phase-3A"])
+    backend_dir = Path(__file__).resolve().parents[1]
+    candidate_paths.extend([
+        backend_dir / "data",
+        backend_dir.parent / "data",
+    ])
     real_files = {
         "Wholesale_customers_data.csv": "text/csv",
         "online_retail.csv": "text/csv",
