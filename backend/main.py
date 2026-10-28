@@ -21,6 +21,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from config.settings import settings
+import starlette.formparsers
+
+# Decision D-S1 Option B: Configure Starlette MultiPartParser to keep file spooling
+# strictly in memory up to MAX_INGRESS_BODY_BYTES (zero disk writes).
+starlette.formparsers.MultiPartParser.spool_max_size = settings.MULTIPART_SPOOL_MAX_BYTES
+
 from src.memory.lifecycle import ephemeral_processing
 from src.models import (
     ColumnDescriptor,
@@ -80,13 +86,13 @@ app = FastAPI(
 
 from src.middleware.body_limit import BodyLimitMiddleware
 
-# 1. Rate Limiting Middleware (inert placeholder)
+# 1. Rate Limiting Middleware (inert placeholder, innermost)
 app.add_middleware(RateLimiterPlaceholderMiddleware)
 
 # 2. Ingress Body Limit Middleware (F-09 early rejection)
 app.add_middleware(BodyLimitMiddleware)
 
-# 3. CORS Middleware allowing Next.js frontend origin
+# 4. CORS Middleware allowing Next.js frontend origin (outermost, added last)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,

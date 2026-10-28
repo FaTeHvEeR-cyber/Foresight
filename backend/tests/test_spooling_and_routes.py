@@ -9,6 +9,7 @@ WS-B & WS-C verification:
 from __future__ import annotations
 
 import io
+import os
 import tempfile
 from collections import Counter
 from typing import List, Tuple
@@ -59,6 +60,7 @@ def test_no_duplicate_method_and_path_routes():
     )
 
 
+
 def test_segmentation_routes_point_to_audited_handler():
     """Verify that POST /api/v1/segmentation and POST /segmentation point to audited segmentation handler."""
     routes = _get_flattened_routes()
@@ -98,18 +100,52 @@ def test_root_aliases_and_docs_preserved():
     assert "/docs" in paths, "Swagger UI /docs must be preserved"
 
 
-def test_starlette_multipart_spool_max_size_class_attribute():
-    """Verify Starlette MultiPartParser exposes spool_max_size attribute with 1 MB default."""
+from config.settings import settings
+
+
+def test_starlette_multipart_spool_max_size_configured():
+    """Verify Starlette MultiPartParser exposes spool_max_size set to MULTIPART_SPOOL_MAX_BYTES."""
     assert hasattr(starlette.formparsers.MultiPartParser, "spool_max_size"), (
         "MultiPartParser must expose spool_max_size class attribute"
     )
-    assert starlette.formparsers.MultiPartParser.spool_max_size == 1024 * 1024, (
-        f"Default spool_max_size must be 1 MB (1048576 bytes), got {starlette.formparsers.MultiPartParser.spool_max_size}"
+    assert (
+        starlette.formparsers.MultiPartParser.spool_max_size
+        == settings.MULTIPART_SPOOL_MAX_BYTES
+    ), (
+        f"MultiPartParser.spool_max_size ({starlette.formparsers.MultiPartParser.spool_max_size}) "
+        f"must equal settings.MULTIPART_SPOOL_MAX_BYTES ({settings.MULTIPART_SPOOL_MAX_BYTES})"
     )
 
 
-def test_spooling_rollover_threshold(monkeypatch):
-    """Verify upload rollover mechanics: <= 1MB does not trigger rollover, > 1MB triggers rollover."""
+def test_parser_uses_configured_spool_size_at_request_time(monkeypatch):
+    """Verify that MultiPartParser passes the configured spool_max_size to SpooledTemporaryFile at request time."""
+    spooled_max_sizes: List[int] = []
+    orig_init = tempfile.SpooledTemporaryFile.__init__
+
+    def hooked_init(self, *args, **kwargs):
+        if "max_size" in kwargs:
+            spooled_max_sizes.append(kwargs["max_size"])
+        elif len(args) > 0:
+            spooled_max_sizes.append(args[0])
+        return orig_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(tempfile.SpooledTemporaryFile, "__init__", hooked_init)
+
+    data = b"col1,col2\n12,34\n"
+    res = client.post(
+        "/api/v1/upload",
+        files={"file": ("test_parser_init.csv", io.BytesIO(data), "text/csv")},
+    )
+    assert res.status_code == 200
+    assert len(spooled_max_sizes) > 0, "Expected SpooledTemporaryFile to be initialized during upload"
+    assert spooled_max_sizes[0] == settings.MULTIPART_SPOOL_MAX_BYTES, (
+        f"Expected SpooledTemporaryFile max_size={settings.MULTIPART_SPOOL_MAX_BYTES}, got {spooled_max_sizes[0]}"
+    )
+
+
+@pytest.mark.parametrize("size_mb", [0.5, 2.0, 10.0, 50.0])
+def test_zero_disk_spooling_across_sizes(monkeypatch, size_mb):
+    """Verify in-memory spooling: 0.5, 2, 10, and 50 MB uploads trigger 0 rollovers and 0 disk files."""
     rollover_count = 0
     orig_rollover = tempfile.SpooledTemporaryFile.rollover
 
@@ -120,26 +156,56 @@ def test_spooling_rollover_threshold(monkeypatch):
 
     monkeypatch.setattr(tempfile.SpooledTemporaryFile, "rollover", hooked_rollover)
 
-    # 1. 0.5 MB upload (512 KB <= 1 MB): 0 rollovers
-    rollover_count = 0
-    small_data = b"col1,col2\n" + (b"12,34\n" * 50_000)  # ~300 KB
-    res_small = client.post(
-        "/api/v1/upload",
-        files={"file": ("small.csv", io.BytesIO(small_data), "text/csv")},
-    )
-    assert res_small.status_code == 200
-    assert rollover_count == 0, f"Expected 0 rollovers for small upload, got {rollover_count}"
+    temp_dir = tempfile.gettempdir()
+    def _count_tmp_files() -> int:
+        try:
+            return sum(1 for f in os.listdir(temp_dir) if f.startswith("~RF") or f.endswith(".tmp"))
+        except Exception:
+            return 0
 
-    # 2. 2 MB upload (> 1 MB default spool): triggers rollover
-    rollover_count = 0
-    num_bytes = 2 * 1024 * 1024
+    tmp_files_before = _count_tmp_files()
+
+    # Generate synthetic CSV in-memory
+    num_bytes = int(size_mb * 1024 * 1024)
     line = b"col1,col2\n"
     row = b"1234,5678\n"
-    repeats = (num_bytes - len(line)) // len(row)
-    large_data = line + (row * repeats)
-    res_large = client.post(
+    repeats = max(1, (num_bytes - len(line)) // len(row))
+    data = line + (row * repeats)
+
+    res = client.post(
         "/api/v1/upload",
-        files={"file": ("large_2mb.csv", io.BytesIO(large_data), "text/csv")},
+        files={"file": (f"bench_{size_mb}mb.csv", io.BytesIO(data), "text/csv")},
     )
-    assert res_large.status_code == 200
-    assert rollover_count == 1, f"Expected 1 rollover for 2MB upload under default 1MB spool, got {rollover_count}"
+    assert res.status_code == 200, f"Upload {size_mb}MB failed: {res.text}"
+    assert rollover_count == 0, (
+        f"Expected 0 SpooledTemporaryFile rollovers for {size_mb}MB upload, got {rollover_count}"
+    )
+
+    tmp_files_after = _count_tmp_files()
+    assert tmp_files_after <= tmp_files_before, (
+        f"Expected no persistent temp files after {size_mb}MB upload (before={tmp_files_before}, after={tmp_files_after})"
+    )
+
+
+def test_oversized_spool_and_memory_rejection():
+    """Verify 50 MB + 1 byte returns 413, and 120 MB returns 413 with bounded memory."""
+    # 1. 50 MB + 1 byte of valid multi-row data
+    limit = 50 * 1024 * 1024
+    oversized_data = (b"123456789\n") * (limit // 10) + b"\n"
+    assert len(oversized_data) == limit + 1
+    res = client.post(
+        "/api/v1/upload",
+        files={"file": ("oversized_50mb.csv", io.BytesIO(oversized_data), "text/csv")},
+    )
+    assert res.status_code == 413
+    assert f"File exceeds the {settings.MAX_FILE_SIZE_MB}MB limit" in res.json()["detail"]
+
+    # 2. 120 MB Content-Length fast path
+    large_120mb = 120 * 1024 * 1024
+    res_120 = client.post(
+        "/api/v1/upload",
+        headers={"Content-Length": str(large_120mb), "Content-Type": "multipart/form-data; boundary=boundary"},
+        content=b"oversized_payload",
+    )
+    assert res_120.status_code == 413
+
