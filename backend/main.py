@@ -85,11 +85,15 @@ app = FastAPI(
 )
 
 from src.middleware.body_limit import BodyLimitMiddleware
+from src.middleware.concurrency_cap import UploadConcurrencyMiddleware
 
 # 1. Rate Limiting Middleware (inert placeholder, innermost)
 app.add_middleware(RateLimiterPlaceholderMiddleware)
 
-# 2. Ingress Body Limit Middleware (F-09 early rejection)
+# 2. Concurrency Cap Middleware (Phase 4 Task 1c per-process cap)
+app.add_middleware(UploadConcurrencyMiddleware)
+
+# 3. Ingress Body Limit Middleware (F-09 early rejection)
 app.add_middleware(BodyLimitMiddleware)
 
 # 4. CORS Middleware allowing Next.js frontend origin (outermost, added last)
