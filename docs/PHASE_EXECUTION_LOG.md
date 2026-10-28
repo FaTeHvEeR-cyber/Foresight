@@ -325,7 +325,7 @@ Agent Split:
     - Audited duplicate `/api/v1/segmentation` registration across `analytics_router.py` and `segmentation.py`. Confirmed both pointed to `src.api.segmentation.segmentation`.
     - Removed redundant route handler from `backend/src/api/analytics_router.py` (lines 158–176).
     - Added duplicate route invariant test in `backend/tests/test_spooling_and_routes.py`.
-    - Documented root-level aliases (`/forecast`, `/hypotheses`, `/segmentation`, `/upload`, `/api/upload`, `/health`) and documentation endpoints with Phase 5 deprecation recommendations.
+    - Documented root-level aliases (`/forecast`, `/hypotheses`, `/segmentation`, `/health`) and documentation endpoints with Phase 5 deprecation recommendations (note: `/upload` and `/api/upload` were eliminated in Task 1 consolidation and return 404).
   - **WS-D (Loader Claim & Path Scan)**:
     - Ran raw greps: `_load_engine` returned 0 matches; `joblib` returned 4 matches exclusively in `backend/src/training/`.
     - Verified that live inference routes execute dynamic in-memory training and scoring on uploaded data; no pre-trained `.joblib` models are loaded at runtime.
@@ -341,6 +341,49 @@ Agent Split:
 - **Commits**:
   - `cabf4dc`: `fix(upload): reject oversized bodies before reading them (F-09)`
   - `a39f2c9`: `test(security): spooling measurement and duplicate-route invariant`
+
+---
+
+## 14. Phase 4 Task 1c: In-Memory Multipart Spooling, Per-Process Concurrency Cap & Path Decoupling (F-10 Closed)
+
+- **Environment**: OS = Windows 11 Home (win32, x64), Python = 3.14.3, Starlette = 1.6.0, FastAPI = 0.141.1.
+- **Goal**: Resolve route table contradiction regarding `/upload` and `/api/upload` (WS-A), close Finding F-10 via Decision D-S1 Option B (WS-B), enforce per-process upload concurrency cap with HTTP 503 and `Retry-After: 5` (WS-C), preserve CORS on early 413/503 errors (WS-D), complete Task 1 residual verifications (WS-E), and decouple test suites from hardcoded home paths via `FORESIGHT_DATA_DIR` (WS-F).
+- **Architectural & Security Remediations**:
+  - **WS-A (Route Table Contradiction Resolution)**:
+    - Executed live route reflection on `app.routes`. Confirmed `upload_root` and `upload_api` never existed in `backend/main.py`; both return HTTP 404.
+    - Corrected Section 11.2 of `backend/reports/phase3b_security_audit.md` to accurately document all 13 active routes (including `/api/health` and `/docs/oauth2-redirect`).
+    - Added `test_exact_post_routes_allowlist` to `backend/tests/test_spooling_and_routes.py` asserting exact match to the 7 approved POST routes: `{'/api/v1/forecast', '/api/v1/hypotheses', '/api/v1/segmentation', '/api/v1/upload', '/forecast', '/hypotheses', '/segmentation'}`.
+  - **WS-B (In-Memory Multipart Spooling - F-10 Resolution)**:
+    - Configured `settings.MULTIPART_SPOOL_MAX_BYTES = 50 * 1024 * 1024 + 64 * 1024` (52,494,336 bytes) in `backend/config/settings.py`.
+    - Pinned `starlette==1.6.0` and `fastapi==0.141.1` in `backend/requirements.txt`.
+    - Set `starlette.formparsers.MultiPartParser.spool_max_size = settings.MULTIPART_SPOOL_MAX_BYTES` at startup in `backend/main.py`.
+    - Guard tests in `backend/tests/test_spooling_and_routes.py` verified 0 rollovers and 0 OS temporary files across 0.5 MB, 2.0 MB, 10.0 MB, and 50.0 MB uploads.
+  - **WS-C (Per-Process Upload Concurrency Cap)**:
+    - Added `MAX_CONCURRENT_UPLOADS: int = 2` to `backend/config/settings.py`.
+    - Implemented `UploadConcurrencyMiddleware` (`backend/src/middleware/concurrency_cap.py`) using non-blocking slot acquisition (`asyncio.Semaphore`).
+    - Saturated requests immediately receive HTTP 503 Service Unavailable with `Retry-After: 5` header and `{"detail": "Server is processing maximum concurrent uploads. Please retry shortly."}` without body buffering.
+    - Measured 4 concurrent 50 MB uploads across Caps 1, 2, and 4. Justified default = 2 (balances parallel processing with < 857 MB peak RSS under 50 MB loads, avoiding Linux OOM kills observed at Cap 4's 1.32 GB).
+  - **WS-D (CORS Preservation on Early Middleware Errors)**:
+    - Verified ASGI middleware wrapping order in `backend/main.py`: `CORSMiddleware` (outermost) wraps `BodyLimitMiddleware`, which wraps `UploadConcurrencyMiddleware`, which wraps `RateLimiterPlaceholderMiddleware`.
+    - Automated tests in `backend/tests/test_concurrency_cap_and_cors.py` prove both 413 and 503 responses carry `Access-Control-Allow-Origin: http://localhost:3000`.
+  - **WS-E (Residual Verifications)**:
+    - Confirmed `rate_limit.py` at `backend/src/middleware/rate_limit.py` with passing unit tests.
+    - Verified complete elimination of `backend/app` tree and removed legacy `app.config` imports.
+    - Captured and recorded red-test failure proof for `test_zero_retention.py` (`AssertionError: Container main.DATA_STORE grew from 1 to 13`).
+    - Verified RSS stability: 30-upload XLSX net delta = -3.55 MB; 20-upload document net delta = +0.13 MB.
+  - **WS-F (Local Path Decoupling)**:
+    - Replaced 11 hardcoded user paths across 8 test and script files with dynamic `FORESIGHT_DATA_DIR` environment variable resolution.
+    - Verified zero matches for `C:\Users` or `D:\Foresight` in tracked files.
+    - Verified tests skip cleanly when `FORESIGHT_DATA_DIR` is unset, and pass 100% when set.
+- **Test Arithmetic**:
+  - Baseline from Task 1b: 449 passed.
+  - Added tests (+14):
+    - `backend/tests/test_spooling_and_routes.py`: +6 tests (exact route allow-list, parser config verification, request-time spool threshold, 0-disk spooling across 4 sizes, and 413 memory rejection).
+    - `backend/tests/test_concurrency_cap_and_cors.py`: +8 tests (CORS on 413, CORS on 503, cap enforcement, release on success/error/disconnect, health check exemption, inert rate limiter).
+  - Suite Total: **463 passed, 0 failed, 10 skipped (when FORESIGHT_DATA_DIR unset)**.
+  - Latency suite: **11 passed** in isolation.
+  - Frontend suite: **76 passed**, `tsc --noEmit` exited code 0.
+
 
 
 

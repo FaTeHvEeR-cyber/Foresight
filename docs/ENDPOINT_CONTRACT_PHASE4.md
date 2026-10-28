@@ -453,6 +453,7 @@ The backend implements standard RFC 7807 problem details with consistent JSON er
 | **`413`** | `Content Too Large` | Upload payload exceeds 50.0 MB (`52,428,800` bytes). | *"File exceeds the 50 MB upload limit. Please compress or subsample your dataset."* |
 | **`415`** | `Unsupported Media Type` | 1. Non-tabular extension (e.g. `.exe`, `.pdf`, `.zip`).<br>2. MIME type mismatch.<br>3. Executable magic bytes detected (`MZ`, `ELF`, shell script `#!`, `\x89PNG`).<br>4. Binary null bytes found in CSV/TSV. | *"Invalid or unsupported file format. Please upload a standard CSV, TSV, XLSX, or Parquet file."* |
 | **`422`** | `Unprocessable Entity` | 1. Corrupt spreadsheet or unparseable CSV.<br>2. Specified `target` or `date_col` not found in headers.<br>3. Target column is non-numeric.<br>4. Target has zero variance across all rows.<br>5. Formula injection attack detected that corrupted structure. | *"The file structure could not be processed. Verify your column headers and ensure the target metric contains numeric values."* |
+| **`503`** | `Service Unavailable` | Upload concurrency cap (`MAX_CONCURRENT_UPLOADS: int = 2`) saturated. Request rejected immediately without reading body. Response carries `Retry-After: 5` header. | *"The server is currently processing the maximum number of concurrent uploads. Please retry after 5 seconds."* |
 | **`500`** | `Internal Server Error` | Unexpected backend runtime or algorithmic failure. | *"An unexpected error occurred during model computation. Our engineering team has been notified."* |
 
 ---

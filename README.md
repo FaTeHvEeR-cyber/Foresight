@@ -47,8 +47,22 @@ Foresight is an intelligent forecasting system consisting of multiple predictive
 
 ### 5. Zero-Retention Architecture & Cross-Request Invariants (Spec §1.1)
 - **Elimination of Process-Level `DATA_STORE`**: Removed the module-level dictionary `DATA_STORE` on the canonical app (`backend/main.py`). Uploaded datasets (raw DataFrames, imputed modeling DataFrames, null profiles, parsed document text) are never retained across requests.
-- **Guaranteed Ephemeral Lifecycle**: All tabular and document parsing operations execute in-memory via `io.BytesIO` inside `ephemeral_processing()`. Explicit variable dereferencing (`del`) and `gc.collect()` run inside guaranteed `finally` blocks on both success (200) and error (4xx/500) paths.
+- **Guaranteed Ephemeral Lifecycle & In-Memory Spooling**: All tabular and document parsing operations execute in-memory via `io.BytesIO` inside `ephemeral_processing()`. Multipart ingress spooling is kept strictly in RAM (`MultiPartParser.spool_max_size = 52,494,336` bytes), ensuring zero disk persistence during upload streaming. Explicit variable dereferencing (`del`) and `gc.collect()` run inside guaranteed `finally` blocks on both success (200) and error (4xx/500) paths.
 - **Contract & Identity Preservation**: The upload contract (`UploadResponse`) retains `fileId` as an opaque correlation token with zero persisted state behind it, maintaining full backward compatibility with frontend clients.
+
+### 6. In-Memory Multipart Ingress Spooling & Zero Disk Persistence (Finding F-10 Closed)
+- **Problem**: Starlette's `MultiPartParser` historically defaulted `spool_max_size` to 1 MB (`1024 * 1024` bytes). Uploads $> 1$ MB triggered Python's `SpooledTemporaryFile.rollover()`, writing transient files to `%TEMP%` or `/tmp` during request parsing. While deleted upon request completion, this transient disk write violated Master Spec §1.1 ("zero disk persistence; all processing in-memory").
+- **Resolution (Decision D-S1 Option B)**: Raised `MultiPartParser.spool_max_size` at application startup in `backend/main.py` to match `settings.MULTIPART_SPOOL_MAX_BYTES` (`50 * 1024 * 1024 + 64 * 1024 = 52,494,336` bytes).
+- **Zero Rollover Verification**: Verified across 0.5 MB, 1.0 MB, 2.0 MB, 10.0 MB, and 50.0 MB uploads that 0 rollovers occur and 0 OS temporary files are created during or after requests.
+- **Dependency Pinning**: Pinned `starlette==1.6.0` and `fastapi==0.141.1` in `backend/requirements.txt` to guarantee deterministic multipart parsing behavior.
+
+### 7. Per-Process Upload Concurrency Cap (503 Service Unavailable)
+- **Mechanism**: To prevent RAM exhaustion from multiple simultaneous 50 MB in-memory spools (where 4 concurrent uploads consume ~1.32 GB RAM), an ASGI middleware `UploadConcurrencyMiddleware` enforces `MAX_CONCURRENT_UPLOADS: int = 2` slots per worker process.
+- **Immediate Non-Blocking 503 Rejection**: When slots are saturated, additional upload requests are rejected immediately at the ASGI boundary with `HTTP 503 Service Unavailable`, carrying a `Retry-After: 5` header and `{"detail": "Server is processing maximum concurrent uploads. Please retry shortly."}` without buffering request bodies.
+- **Architecture Rationale (Per-Process vs Shared State)**: The cap is maintained per worker process using a local `asyncio.Semaphore`. In multi-worker deployments (e.g. Gunicorn/Uvicorn with $W$ workers), the effective system-wide concurrency cap is $W \times \text{cap}$. Per-process enforcement was selected because:
+  1. It requires zero external dependencies (no Redis, Memcached, or IPC locking), preserving the zero-dependency, local-first offline architecture.
+  2. Memory is partitioned per process; each process manages its own heap bounds within free-tier container limits (e.g. Render 512 MB).
+- **CORS Preservation**: Registered before `CORSMiddleware` (which is outermost), ensuring both 413 and 503 rejections carry `Access-Control-Allow-Origin: http://localhost:3000` headers. Health check endpoints (`/health`, `/api/health`) are exempt from the cap.
 
 ---
 
@@ -1242,4 +1256,43 @@ A systematic read-only audit of the 10 chart tokens against the backend response
   - Suite Total: **449 passed, 0 failed, 0 skipped, 0 xfailed**.
   - Latency suite: **11 passed** in isolation.
   - Frontend suite: **76 passed**, `tsc --noEmit` exited code 0.
+
+## Update 2026-10-28 (Phase 4 Task 1c: In-Memory Multipart Spooling, Per-Process Concurrency Cap & Local Path Decoupling)
+- **Task**: Phase 4 Task 1c In-Memory Multipart Spooling, Per-Process Concurrency Cap, Route Table Correction, and Local Path Decoupling.
+- **Environment**: OS = Windows 11 Home (win32, x64, 10.0.26300), Python = 3.14.3, Starlette = 1.6.0, FastAPI = 0.141.1.
+- **Architectural & Security Remediations**:
+  - **WS-A (Route Table Contradiction Resolution)**:
+    - Confirmed `POST /upload` (`upload_root`) and `POST /api/upload` (`upload_api`) never existed in `backend/main.py` and were removed during Task 1 consolidation. Both return HTTP 404.
+    - Corrected Section 11.2 of `backend/reports/phase3b_security_audit.md` to document the 13 active routes (including `/api/health` and `/docs/oauth2-redirect`).
+    - Added `test_exact_post_routes_allowlist` to `backend/tests/test_spooling_and_routes.py` asserting exact match to the 7 approved POST routes: `{'/api/v1/forecast', '/api/v1/hypotheses', '/api/v1/segmentation', '/api/v1/upload', '/forecast', '/hypotheses', '/segmentation'}`.
+  - **WS-B (In-Memory Multipart Spooling - F-10 Closed)**:
+    - Configured `settings.MULTIPART_SPOOL_MAX_BYTES = 50 * 1024 * 1024 + 64 * 1024` (52,494,336 bytes) in `backend/config/settings.py`.
+    - Pinned `starlette==1.6.0` and `fastapi==0.141.1` in `backend/requirements.txt`.
+    - Initialized `starlette.formparsers.MultiPartParser.spool_max_size = settings.MULTIPART_SPOOL_MAX_BYTES` at startup in `backend/main.py`.
+    - Verified 0 rollovers and 0 OS temporary files created across 0.5 MB, 2.0 MB, 10.0 MB, and 50.0 MB uploads.
+  - **WS-C (Per-Process Upload Concurrency Cap)**:
+    - Implemented `UploadConcurrencyMiddleware` (`backend/src/middleware/concurrency_cap.py`) enforcing `MAX_CONCURRENT_UPLOADS: int = 2` via non-blocking slot acquisition.
+    - Rejects saturated upload requests immediately at the ASGI boundary with HTTP 503 Service Unavailable, `Retry-After: 5` header, and `{"detail": "Server is processing maximum concurrent uploads. Please retry shortly."}` without reading the body.
+    - Benchmarked 4 concurrent 50 MB uploads across Caps 1, 2, and 4. Justified default = 2 (completes 2x 50MB uploads in 9.03s within 856.72 MB peak RSS, avoiding Linux OOM killer termination observed at Cap 4's 1.32 GB).
+  - **WS-D (CORS Preservation on Early Middleware Errors)**:
+    - Placed `CORSMiddleware` as the outermost ASGI middleware.
+    - Verified that HTTP 413 (body limit) and HTTP 503 (concurrency cap) responses carry `Access-Control-Allow-Origin: http://localhost:3000`.
+  - **WS-E (Residual Verifications)**:
+    - Verified `backend/src/middleware/rate_limit.py` location and passing unit test.
+    - Verified complete elimination of `backend/app` tree and removed legacy `app.config` imports.
+    - Recorded red-test failure proof for `test_zero_retention.py` (`AssertionError: Container main.DATA_STORE grew from 1 to 13`).
+    - Verified RSS stability: 30-upload XLSX net delta = -3.55 MB; 20-upload document net delta = +0.13 MB.
+  - **WS-F (Local Path Decoupling via FORESIGHT_DATA_DIR)**:
+    - Replaced 11 hardcoded user paths across 8 test and script files with dynamic `FORESIGHT_DATA_DIR` environment variable resolution.
+    - Verified zero matches for `C:\Users` or `D:\Foresight` in tracked files.
+    - Verified clean skip behavior when unset and 100% pass when set.
+- **Test Arithmetic & Verification**:
+  - Baseline before Task 1c: 449 tests.
+  - Added tests (+14):
+    - `backend/tests/test_spooling_and_routes.py`: +6 tests.
+    - `backend/tests/test_concurrency_cap_and_cors.py`: +8 tests.
+  - Suite Total: **463 tests (447 passed, 16 skipped when FORESIGHT_DATA_DIR unset; 457 passed, 6 skipped when set)**.
+  - Latency suite: **11 passed** in isolation.
+  - Frontend suite: **76 passed**, `tsc --noEmit` clean exit.
+
 
