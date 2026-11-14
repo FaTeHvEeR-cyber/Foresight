@@ -17,6 +17,7 @@ from typing import Any, Dict, Optional, cast
 import uuid
 
 from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -146,6 +147,126 @@ async def api_health():
 from fastapi.responses import JSONResponse
 
 
+def _sync_process_upload(file_bytes: bytes, filename: str, content_type: str) -> UploadResponse:
+    """Synchronous CPU-bound parsing and profiling executed in worker thread (F-11)."""
+    safe_filename = os.path.basename(filename.replace("\\", "/"))
+
+    raw_df = None
+    sanitized_df = None
+    raw_null_profile_list = None
+    doc_result = None
+    doc_text = None
+
+    try:
+        # 2. Run validate_mime_and_extension and validate_file_size from sanitization.py
+        try:
+            validate_mime_and_extension(filename, content_type)
+            validate_file_size(file_bytes)
+        except HTTPException:
+            raise
+        except (SanitizationError, MimeTypeError, FileSizeError) as exc:
+            error_msg = getattr(exc, "detail", str(exc))
+            error_status = getattr(exc, "status_code", status.HTTP_400_BAD_REQUEST)
+            raise HTTPException(status_code=error_status, detail=error_msg)
+        except Exception as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Validation failed: {str(exc)}")
+
+        # 3. Classify detectedKind ("tabular" | "document" | "mixed") based on extension
+        ext = filename.rsplit(".", 1)[-1].lower().strip() if "." in filename else ""
+        if ext in TABULAR_EXTENSIONS:
+            detected_kind: DetectedFileKind = "tabular"
+        elif ext in DOCUMENT_EXTENSIONS:
+            detected_kind: DetectedFileKind = "document"
+        else:
+            detected_kind: DetectedFileKind = "mixed"
+
+        detected_format: DetectedFormat = cast(DetectedFormat, ext)
+        file_id = f"f_{uuid.uuid4().hex[:12]}"
+
+        # 3.5 Run signature & magic byte checks across all uploads (tabular & document)
+        check_dangerous_and_magic_bytes(file_bytes, ext)
+
+        # 4. For tabular: gatekeep → parse_tabular → sanitize_tabular_cells → compute_raw_null_profile
+        if detected_kind == "tabular":
+            gatekeep_tabular_upload(filename, file_bytes, content_type)
+            try:
+                raw_df = parse_tabular(file_bytes, ext)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Failed to parse tabular file '{safe_filename}': {type(exc).__name__}",
+                )
+
+            sanitized_df = sanitize_tabular_cells(raw_df)
+            raw_null_profile_list = compute_raw_null_profile(sanitized_df)
+
+            row_count = len(sanitized_df)
+            column_count = len(sanitized_df.columns)
+            mem_usage = int(sanitized_df.memory_usage(deep=True).sum())
+
+            # Infer column types for column descriptors
+            inferred_types = {
+                item["name"]: item["inferredType"]
+                for item in infer_column_types(sanitized_df)
+            }
+            columns = [
+                ColumnDescriptor(
+                    name=str(col_name),
+                    inferredType=inferred_types.get(str(col_name), "text"),
+                    nullCount=p.nullCount if p.nullCount is not None else 0,
+                    nullPercentage=p.nullPercentage,
+                )
+                for col_name, p in zip(sanitized_df.columns, raw_null_profile_list)
+            ]
+
+            # Populate raw null profile dictionary (for UI reporting and warnings)
+            raw_null_profile_payload = {
+                str(p.columnName or col): {
+                    "nullCount": p.nullCount if p.nullCount is not None else 0,
+                    "nullPercentage": p.nullPercentage if p.nullPercentage is not None else 0.0,
+                    "totalRows": p.totalRows if p.totalRows is not None else row_count,
+                }
+                for col, p in zip(sanitized_df.columns, raw_null_profile_list)
+            }
+
+        # 5. For document: parse_document
+        else:
+            try:
+                doc_result = parse_document(file_bytes, ext)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Failed to parse document file '{safe_filename}': {type(exc).__name__}",
+                )
+
+            doc_text = doc_result.get("raw_text", "")
+            page_count = doc_result.get("page_or_section_count", 1)
+
+            row_count = page_count
+            column_count = None
+            columns = None
+            raw_null_profile_payload = None
+            mem_usage = len(doc_text.encode("utf-8"))
+
+        # Return UploadResponse
+        return UploadResponse(
+            fileId=file_id,
+            fileName=safe_filename,
+            fileSizeBytes=len(file_bytes),
+            detectedKind=detected_kind,
+            detectedFormat=detected_format,
+            rowCount=row_count,
+            columnCount=column_count,
+            columns=columns,
+            rawNullProfile=raw_null_profile_payload,
+            memoryUsageBytes=mem_usage,
+        )
+    finally:
+        del raw_df, sanitized_df, raw_null_profile_list
+        del doc_result, doc_text
+        gc.collect()
+
+
 @app.post("/api/v1/upload", response_model=UploadResponse)
 async def upload(file: Optional[UploadFile] = File(None)):
     """Ingest, validate, profile, and preprocess uploaded dataset or document.
@@ -154,22 +275,18 @@ async def upload(file: Optional[UploadFile] = File(None)):
     Processes bytes -> DataFrame in-memory via io.BytesIO, returns metadata and raw profile,
     and dereferences all buffers and DataFrames followed by gc.collect() in finally.
     No process-level data store or session cache is maintained.
+    Offloads CPU-bound parsing and profiling to a worker thread via run_in_threadpool (F-11).
     """
     with ephemeral_processing():
         if file is None:
             return JSONResponse(status_code=200, content={"message": "Upload stub"})
 
         filename = file.filename or ""
-        safe_filename = os.path.basename(filename.replace("\\", "/"))
+        content_type = file.content_type or ""
 
         raw_contents = None
         file_io = None
         file_bytes = None
-        raw_df = None
-        sanitized_df = None
-        raw_null_profile_list = None
-        doc_result = None
-        doc_text = None
 
         try:
             # 1. Read the uploaded file into bytes via io.BytesIO (capped read as backstop, no disk writes)
@@ -177,110 +294,9 @@ async def upload(file: Optional[UploadFile] = File(None)):
             file_io = io.BytesIO(raw_contents)
             file_bytes = file_io.getvalue()
 
-            # 2. Run validate_mime_and_extension and validate_file_size from sanitization.py
-            try:
-                validate_mime_and_extension(filename, file.content_type or "")
-                validate_file_size(file_bytes)
-            except HTTPException:
-                raise
-            except (SanitizationError, MimeTypeError, FileSizeError) as exc:
-                error_msg = getattr(exc, "detail", str(exc))
-                error_status = getattr(exc, "status_code", status.HTTP_400_BAD_REQUEST)
-                raise HTTPException(status_code=error_status, detail=error_msg)
-            except Exception as exc:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Validation failed: {str(exc)}")
-
-            # 3. Classify detectedKind ("tabular" | "document" | "mixed") based on extension
-            ext = filename.rsplit(".", 1)[-1].lower().strip() if "." in filename else ""
-            if ext in TABULAR_EXTENSIONS:
-                detected_kind: DetectedFileKind = "tabular"
-            elif ext in DOCUMENT_EXTENSIONS:
-                detected_kind: DetectedFileKind = "document"
-            else:
-                detected_kind: DetectedFileKind = "mixed"
-
-            detected_format: DetectedFormat = cast(DetectedFormat, ext)
-            file_id = f"f_{uuid.uuid4().hex[:12]}"
-
-            # 3.5 Run signature & magic byte checks across all uploads (tabular & document)
-            check_dangerous_and_magic_bytes(file_bytes, ext)
-
-            # 4. For tabular: gatekeep → parse_tabular → sanitize_tabular_cells → compute_raw_null_profile
-            if detected_kind == "tabular":
-                gatekeep_tabular_upload(filename, file_bytes, file.content_type)
-                try:
-                    raw_df = parse_tabular(file_bytes, ext)
-                except Exception as exc:
-                    raise HTTPException(
-                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                        detail=f"Failed to parse tabular file '{safe_filename}': {type(exc).__name__}",
-                    )
-
-                sanitized_df = sanitize_tabular_cells(raw_df)
-                raw_null_profile_list = compute_raw_null_profile(sanitized_df)
-
-                row_count = len(sanitized_df)
-                column_count = len(sanitized_df.columns)
-                mem_usage = int(sanitized_df.memory_usage(deep=True).sum())
-
-                # Infer column types for column descriptors
-                inferred_types = {
-                    item["name"]: item["inferredType"]
-                    for item in infer_column_types(sanitized_df)
-                }
-                columns = [
-                    ColumnDescriptor(
-                        name=str(col_name),
-                        inferredType=inferred_types.get(str(col_name), "text"),
-                        nullCount=p.nullCount if p.nullCount is not None else 0,
-                        nullPercentage=p.nullPercentage,
-                    )
-                    for col_name, p in zip(sanitized_df.columns, raw_null_profile_list)
-                ]
-
-                # Populate raw null profile dictionary (for UI reporting and warnings)
-                raw_null_profile_payload = {
-                    str(p.columnName or col): {
-                        "nullCount": p.nullCount if p.nullCount is not None else 0,
-                        "nullPercentage": p.nullPercentage if p.nullPercentage is not None else 0.0,
-                        "totalRows": p.totalRows if p.totalRows is not None else row_count,
-                    }
-                    for col, p in zip(sanitized_df.columns, raw_null_profile_list)
-                }
-
-            # 5. For document: parse_document
-            else:
-                try:
-                    doc_result = parse_document(file_bytes, ext)
-                except Exception as exc:
-                    raise HTTPException(
-                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                        detail=f"Failed to parse document file '{safe_filename}': {type(exc).__name__}",
-                    )
-
-                doc_text = doc_result.get("raw_text", "")
-                page_count = doc_result.get("page_or_section_count", 1)
-
-                row_count = page_count
-                column_count = None
-                columns = None
-                raw_null_profile_payload = None
-                mem_usage = len(doc_text.encode("utf-8"))
-
-            # Return UploadResponse
-            return UploadResponse(
-                fileId=file_id,
-                fileName=safe_filename,
-                fileSizeBytes=len(file_bytes),
-                detectedKind=detected_kind,
-                detectedFormat=detected_format,
-                rowCount=row_count,
-                columnCount=column_count,
-                columns=columns,
-                rawNullProfile=raw_null_profile_payload,
-                memoryUsageBytes=mem_usage,
+            return await run_in_threadpool(
+                _sync_process_upload, file_bytes, filename, content_type
             )
         finally:
-            del raw_df, sanitized_df, raw_null_profile_list
-            del doc_result, doc_text, file_bytes, file_io, raw_contents
+            del file_bytes, file_io, raw_contents
             gc.collect()

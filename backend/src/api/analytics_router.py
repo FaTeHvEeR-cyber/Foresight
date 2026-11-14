@@ -29,9 +29,10 @@ root_router = APIRouter(tags=["analytics"])
 
 
 async def _read_and_validate_upload(file: UploadFile, limit: int) -> bytes:
-    """Read uploaded file and route through Phase 2 security gatekeeper."""
+    """Read uploaded file and route through Phase 2 security gatekeeper on threadpool."""
     raw = await file.read(limit + 1)
-    gatekeep_tabular_upload(
+    await run_in_threadpool(
+        gatekeep_tabular_upload,
         filename=file.filename or "",
         content=raw,
         content_type=file.content_type,

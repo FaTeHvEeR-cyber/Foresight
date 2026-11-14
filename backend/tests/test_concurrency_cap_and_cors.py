@@ -188,3 +188,42 @@ def test_rate_limiter_placeholder_middleware_inert():
     for _ in range(15):
         res = client.get("/health")
         assert res.status_code == 200
+
+
+def test_concurrent_health_during_slow_parse():
+    """Verify that /health responds quickly (< 300ms) even while a heavy slow parse executes in worker thread (F-11)."""
+    import time
+    from scripts.measure_xlsx_expansion import build_realistic_xlsx
+
+    content, _, _, _ = build_realistic_xlsx(num_rows=15_000, num_sheets=1)
+
+    async def _run():
+        transport = httpx.ASGITransport(app=app)
+        health_dur = None
+        upload_dur = None
+
+        async def slow_upload():
+            nonlocal upload_dur
+            t0 = time.perf_counter()
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+                r = await c.post(
+                    "/api/v1/upload",
+                    files={"file": ("slow.xlsx", io.BytesIO(content), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+                )
+                assert r.status_code == 200
+            upload_dur = (time.perf_counter() - t0) * 1000
+
+        async def concurrent_health():
+            nonlocal health_dur
+            await asyncio.sleep(0.3)  # Wait for upload to begin worker-thread parsing
+            t0 = time.perf_counter()
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+                r = await c.get("/health")
+                assert r.status_code == 200
+            health_dur = (time.perf_counter() - t0) * 1000
+
+        await asyncio.gather(slow_upload(), concurrent_health())
+        assert upload_dur > 500.0, f"Expected slow upload to take > 500ms, took {upload_dur:.1f}ms"
+        assert health_dur < 300.0, f"Health check stalled during slow parse: {health_dur:.1f}ms (must be < 300ms)"
+
+    asyncio.run(_run())
