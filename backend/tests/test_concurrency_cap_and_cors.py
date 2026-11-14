@@ -199,8 +199,8 @@ def test_concurrent_health_during_slow_parse():
 
     async def _run():
         transport = httpx.ASGITransport(app=app)
-        health_dur = None
-        upload_dur = None
+        health_dur: float = 0.0
+        upload_dur: float = 0.0
 
         async def slow_upload():
             nonlocal upload_dur

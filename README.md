@@ -1328,7 +1328,7 @@ A systematic read-only audit of the 10 chart tokens against the backend response
 - **Test Arithmetic & Verification**:
   - Baseline before Task 1d: 463 tests.
   - Added tests (+1):
-    - `backend/tests/test_concurrency_cap_and_cors.py`: `test_concurrent_health_during_slow_parse`.
+    - `backend/tests/test_concurrency_cap_and_cors.py`: `test_concurrent_health_during_slow_parse` (with strict `float` typing for Pyright/IDE type safety).
   - Suite Total: **464 tests (100% passing when FORESIGHT_DATA_DIR set; 464 passed, 0 failed, 0 skipped)**.
   - Latency suite: **11 passed** in isolation.
   - Zero-retention suite: **6 passed** in isolation.
