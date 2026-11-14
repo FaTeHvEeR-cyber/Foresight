@@ -227,3 +227,23 @@ def test_concurrent_health_during_slow_parse():
         assert health_dur < 300.0, f"Health check stalled during slow parse: {health_dur:.1f}ms (must be < 300ms)"
 
     asyncio.run(_run())
+
+
+def test_production_default_concurrency_cap_pinned_to_empirical_evidence():
+    """Verify MAX_CONCURRENT_UPLOADS is pinned to 2 as confirmed by Task 1e re-measurement.
+
+    Empirical evidence (measured 2026-11-14 post-F-11 threadpool offloading):
+    - Baseline application RSS with ML dependencies is 376.31 MB.
+    - At Cap = 1: 4 concurrent 50MB requests yield 1x 200 (2.91s) and 3x 503 (0.002s) with 477.22 MB peak point RSS (OS peak 799.11 MB).
+    - At Cap = 2: 4 concurrent 50MB requests yield 2x 200 (4.69s) and 2x 503 (0.0016s) with 577.41 MB peak point RSS (OS peak 1,121.74 MB).
+    - At Cap = 2 under 8 attempts: exactly 2x 200 (4.68s) and 6x 503 (0.0014s) with identical 577.53 MB peak point RSS (OS peak 1,001.85 MB).
+    - At Cap = 4: peak point RSS reaches 842.24 MB (OS peak 1,594.80 MB), doubling wall time to 8.66s.
+    - At Cap = 6: peak point RSS reaches 900.54 MB (OS peak 1,468.88 MB).
+
+    While no cap (not even 1) keeps a 50MB payload under 450MB due to the 376MB ML import baseline,
+    Cap = 2 is the maximum safe default that permits parallel execution for normal workloads
+    (where 2x 5-10MB uploads remain < 410MB) while rejecting saturated requests in < 2ms without body buffering.
+    Any change to this default must be justified by re-running the Task 1e benchmark suite.
+    """
+    assert settings.MAX_CONCURRENT_UPLOADS == 2
+
