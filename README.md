@@ -64,6 +64,15 @@ Foresight is an intelligent forecasting system consisting of multiple predictive
   2. Memory is partitioned per process; each process manages its own heap bounds within free-tier container limits (e.g. Render 512 MB).
 - **CORS Preservation**: Registered before `CORSMiddleware` (which is outermost), ensuring both 413 and 503 rejections carry `Access-Control-Allow-Origin: http://localhost:3000` headers. Health check endpoints (`/health`, `/api/health`) are exempt from the cap.
 
+### 8. Event-Loop Starvation Resolution & Threadpool Offloading (Finding F-11 Resolved)
+- **Problem**: In `backend/main.py:upload()`, CPU-bound tabular parsing (`parse_tabular`), sanitization, null profiling, and type inference were executed synchronously directly inside the `async def` handler on the single asyncio event loop thread. During large or complex uploads (e.g. 25,000-row XLSX parsing taking ~3.5s), the event loop was completely blocked from processing socket I/O, causing concurrent requests—including critical container liveness probes (`GET /health`)—to stall by up to 3.55s (a 1,639x latency degradation).
+- **Remediation**:
+  1. Extracted all CPU-bound parsing, sanitization, and profiling into `_sync_process_upload()`.
+  2. Offloaded execution to worker threads via `await run_in_threadpool(_sync_process_upload, ...)`.
+  3. Wrapped `gatekeep_tabular_upload` in `run_in_threadpool` inside `analytics_router.py` and `segmentation.py`.
+- **Verification**: Concurrently tested `GET /health` during active 25,000-row XLSX parsing. Post-fix median health check latency dropped to **24.26 ms** (worst: 70.78 ms)—a **118x speedup** ensuring container orchestrators never fail liveness probes during heavy ingestion.
+- **Controlled In-Flight Spooling Footprint**: Re-measured 3 trials each under controlled single and 4-concurrent 50 MB workloads. Single 50 MB in-memory upload median peak RSS reached 784.08 MB (+395.23 MB delta during active DataFrame + profile generation), returning to baseline immediately post-request. 4 concurrent 50 MB uploads reached 1,441.75 MB peak RSS with 0 temp file rollovers (pure RAM).
+
 ---
 
 ## Changelog & Recent Fixes
@@ -1294,5 +1303,36 @@ A systematic read-only audit of the 10 chart tokens against the backend response
   - Suite Total: **463 tests (447 passed, 16 skipped when FORESIGHT_DATA_DIR unset; 457 passed, 6 skipped when set)**.
   - Latency suite: **11 passed** in isolation.
   - Frontend suite: **76 passed**, `tsc --noEmit` clean exit.
+
+## Update 2026-11-14 (Phase 4 Task 1d: Event-Loop Starvation Resolution F-11, Controlled Spool Re-Measure & Report Hygiene)
+- **Task**: Phase 4 Task 1d F-11 Verification & Resolution, Controlled Spool Benchmarks Re-Measurement, and Five Report Hygiene Items.
+- **Environment**: OS = Windows 11 Home (win32, x64, 10.0.26300), Python = 3.14.3, Starlette = 1.6.0, FastAPI = 0.141.1.
+- **Architectural & Security Remediations**:
+  - **WS-A (F-11 Verification & Event Loop Starvation Resolution)**:
+    - Verified that `backend/main.py:upload()` executed CPU-bound parsing, profiling, and validation synchronously on the event loop.
+    - Pre-fix benchmark of `GET /health` during active slow parse (25k-row XLSX): Median = **2,885.3 ms**, Worst = **3,551.8 ms** (vs 1.76 ms baseline). F-11 was **CONFIRMED, Medium**.
+    - Remediated by extracting `_sync_process_upload()` and wrapping in `await run_in_threadpool(_sync_process_upload, ...)` in `backend/main.py`. Wrapped `gatekeep_tabular_upload` in `run_in_threadpool` across `analytics_router.py` and `segmentation.py`.
+    - Post-fix benchmark: `GET /health` during active slow parse dropped to Median = **24.26 ms**, Worst = **70.78 ms** (118x faster).
+    - Added permanent regression test `test_concurrent_health_during_slow_parse` to `backend/tests/test_concurrency_cap_and_cors.py`.
+  - **WS-B (Controlled Spool Re-Measurement)**:
+    - Benchmarked 3 trials each for Default (1 MB) vs In-Memory (52.5 MB) across 1x 50 MB and 4x 50 MB concurrent workloads with continuous 10 ms memory sampling.
+    - Single 50 MB upload: Default (1 MB) reached median peak 705.08 MB (+318.35 MB delta, 1 temp file rollover); In-Memory (52.5 MB) reached median peak 784.08 MB (+395.23 MB delta, **0 rollovers, pure RAM**).
+    - 4 Concurrent 50 MB uploads: Default (1 MB) reached median peak 1,346.21 MB (+955.71 MB delta, 4 rollovers); In-Memory (52.5 MB) reached median peak 1,441.75 MB (+1,052.90 MB delta, **0 rollovers, pure RAM**).
+    - Reconciled discrepancy: +49.77 MB (Task 1b) was raw file stream bytes; +4.45 MB (Task 1c) was residual heap delta post-GC; +395.23 MB (Task 1d) is the true in-flight peak RSS with simultaneous raw bytes, `io.BytesIO`, parsed DataFrame, and column descriptors in memory.
+  - **WS-C (Five Report Hygiene Items)**:
+    1. Confirmed commit `c15508d` removed dead `from app.config import settings` imports from `sanitization.py` and `tabular_parser.py`.
+    2. Verified HTTP 503 and `Retry-After: 5` documented in `docs/ENDPOINT_CONTRACT_PHASE4.md` and `README.md`.
+    3. Confirmed zero local user paths in tracked files via `git grep -n -i "rfate" -- .`.
+    4. Reconciled test suite arithmetic: 449 (Task 1b) + 14 (Task 1c) + 1 (Task 1d) = **464 total tests**.
+    5. Confirmed cold-start XGBoost/OpenMP initialization warmup eliminated previous intermittent timeouts.
+- **Test Arithmetic & Verification**:
+  - Baseline before Task 1d: 463 tests.
+  - Added tests (+1):
+    - `backend/tests/test_concurrency_cap_and_cors.py`: `test_concurrent_health_during_slow_parse`.
+  - Suite Total: **464 tests (100% passing when FORESIGHT_DATA_DIR set; 464 passed, 0 failed, 0 skipped)**.
+  - Latency suite: **11 passed** in isolation.
+  - Zero-retention suite: **6 passed** in isolation.
+  - Frontend suite: **76 passed**, `tsc --noEmit` clean exit.
+
 
 

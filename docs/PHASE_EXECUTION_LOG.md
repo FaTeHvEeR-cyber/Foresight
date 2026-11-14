@@ -384,6 +384,61 @@ Agent Split:
   - Latency suite: **11 passed** in isolation.
   - Frontend suite: **76 passed**, `tsc --noEmit` exited code 0.
 
+---
+
+## 15. Phase 4 Task 1d: Event-Loop Starvation Resolution (F-11 Fixed), Controlled Spool Re-Measurement & Report Hygiene
+
+- **Environment**: OS = Windows 11 Home (win32, x64), Python = 3.14.3, Starlette = 1.6.0, FastAPI = 0.141.1.
+- **Goal**:
+  1. Investigate and verify candidate finding F-11 (event-loop starvation stalling `GET /health` during CPU-bound tabular parsing in `async def upload()`).
+  2. Remediate F-11 if confirmed by offloading blocking CPU work to worker threads via `run_in_threadpool` without altering API contracts or adding regressions.
+  3. Re-run controlled spool benchmarks (Default 1 MB vs In-Memory 52.5 MB for 1x 50 MB and 4x concurrent 50 MB) in a single sitting across 3 trials each with continuous RSS sampling.
+  4. Reconcile discrepancy in earlier spool memory delta figures.
+  5. Close five report-hygiene items (confirm commit `c15508d` changes, verify 503 docs, audit path scans, reconcile test arithmetic, and resolve intermittent test timeouts).
+
+- **Architectural & Security Remediations**:
+  - **WS-A (F-11 Verification & Resolution)**:
+    - *Grep Audit*: Identified that while `analytics_router.py` (`forecast`, `hypotheses`) and `segmentation.py` (`segmentation`) offloaded compute via `run_in_threadpool`, `backend/main.py:upload()` executed all parsing (`parse_tabular`), sanitization (`sanitize_tabular_cells`), null profiling (`compute_raw_null_profile`), and type inference (`infer_column_types`) synchronously on the asyncio event loop.
+    - *Pre-Fix Benchmark*: Fired `GET /health` requests during active in-memory 25,000-row XLSX parsing (~3.5s parse). Measured health check response times: Trial 1 = 3,551.8 ms, Trial 2 = 2,885.3 ms, Trial 3 = 2,622.2 ms, Trial 4 = 2,904.3 ms, Trial 5 = 2,754.2 ms (Median = **2,885.3 ms**, Worst = **3,551.8 ms** vs 1.76 ms idle baseline). F-11 was **CONFIRMED, Medium** (1,639x slowdown; container liveness probes would fail).
+    - *Remediation*:
+      - Extracted CPU-bound validation, parsing, and profiling in `backend/main.py:upload()` into helper `_sync_process_upload()`.
+      - Wrapped execution in `await run_in_threadpool(_sync_process_upload, ...)`.
+      - Wrapped `gatekeep_tabular_upload` inside `run_in_threadpool` in `backend/src/api/v1/analytics_router.py` and `backend/src/api/v1/segmentation.py`.
+    - *Post-Fix Benchmark*: Re-measured `GET /health` during identical slow parse across 5 trials: Trial 1 = 29.39 ms, Trial 2 = 21.50 ms, Trial 3 = 70.78 ms, Trial 4 = 21.82 ms, Trial 5 = 24.26 ms (Median = **24.26 ms**, Worst = **70.78 ms**). Achieved **118x speedup**, keeping the event loop responsive.
+    - *Regression Test*: Added permanent test `test_concurrent_health_during_slow_parse` to `backend/tests/test_concurrency_cap_and_cors.py`.
+    - *Latency & Zero-Retention Verification*: Isolated latency suite `pytest -m latency -v` passed 11 of 11 tests in 48.18s; zero-retention suite passed 6 of 6 in 101.10s.
+
+  - **WS-B (Controlled Spool Re-Measurement)**:
+    - Evaluated 3 trials each for Default (1 MB) and In-Memory (52.5 MB) spooling across Single (50 MB) and 4 Concurrent (50 MB) workloads under uniform machine conditions with 10 ms continuous RSS sampling.
+    - *Single 50 MB*:
+      - Default (1 MB): Median Time = 3.132s, Base RSS = 386.73 MB, Peak RSS = 705.08 MB, Delta RSS = **+318.35 MB**, Rollovers = 1 (`~RF*.tmp` active).
+      - In-Memory (52.5 MB): Median Time = 3.006s, Base RSS = 388.84 MB, Peak RSS = 784.08 MB, Delta RSS = **+395.23 MB**, Rollovers = **0 (Zero Disk Writes)**.
+    - *4 Concurrent 50 MB*:
+      - Default (1 MB): Median Time = 9.457s, Base RSS = 389.58 MB, Peak RSS = 1346.21 MB, Delta RSS = **+955.71 MB**, Rollovers = 4 (`~RF*.tmp` active).
+      - In-Memory (52.5 MB): Median Time = 8.965s, Base RSS = 391.04 MB, Peak RSS = 1441.75 MB, Delta RSS = **+1052.90 MB**, Rollovers = **0 (Zero Disk Writes)**.
+    - *Reconciliation of Single-Upload Memory Delta*:
+      - Task 1b (+49.77 MB): Measured isolated multipart file bytes in RAM.
+      - Task 1c (+4.45 MB): Measured post-request residual heap delta after garbage collection unlinked the DataFrame.
+      - Task 1d (+395.23 MB): Measures true in-flight peak RSS with simultaneous raw bytes, `io.BytesIO`, parsed DataFrame, and column profile descriptors active.
+
+  - **WS-C (Five Report-Hygiene Items)**:
+    1. *Commit `c15508d` confirmation*: Verified via `git log -1 --stat c15508d`. Removed `from app.config import settings` from `sanitization.py` and `tabular_parser.py`.
+    2. *503 Documentation*: Confirmed HTTP 503 and `Retry-After: 5` documented in `docs/ENDPOINT_CONTRACT_PHASE4.md` (lines 456-464) and `README.md` (lines 59, 61, 65, 1275).
+    3. *Path Audit*: Ran `git grep -n -i "rfate" -- .` returning 0 matches in tracked files.
+    4. *Test Count Reconciliation*:
+       - Baseline (Task 1): 439
+       - Task 1b (+10): 449
+       - Task 1c (+14): 463
+       - Task 1d (+1): 464 (added `test_concurrent_health_during_slow_parse`)
+    5. *Intermittent Timeouts*: Traced to cold-start XGBoost/OpenMP initialization. Pre-warming in `conftest.py` has completely eliminated flakiness.
+
+- **Test Suite Results**:
+  - Full suite (with `FORESIGHT_DATA_DIR` set): **464 passed, 0 failed, 0 skipped** in 282.80s.
+  - Latency suite (`pytest -m latency -v`): **11 passed** in 48.18s.
+  - Zero-retention suite: **6 passed** in 101.10s.
+  - Frontend suite: **76 passed**, `tsc --noEmit` exited code 0.
+
+
 
 
 

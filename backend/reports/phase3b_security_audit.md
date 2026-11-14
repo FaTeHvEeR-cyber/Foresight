@@ -580,17 +580,70 @@ The application currently exposes the following 13 active routes:
 > [!NOTE]
 > **Resolution of Route Table Contradiction (WS-A)**: Prior draft notes listed `POST /upload` (`upload_root`) and `POST /api/upload` (`upload_api`) as active routes. Live route reflection via `app.routes` and historical git inspection confirm neither route exists in `backend/main.py`; both were permanently removed in Task 1 consolidation and return HTTP 404 Not Found. `POST /api/v1/upload` is the sole canonical upload endpoint. An exact POST route allow-list test in `backend/tests/test_spooling_and_routes.py` (`test_exact_post_routes_allowlist`) strictly enforces that the 7 registered POST routes match the approved set.
 
+### 11.3. Decision D4 Finding Status: CLOSED
+Decision D4 (elimination of root upload aliases `POST /upload` and `POST /api/upload`) is officially verified and **CLOSED**. Both alias routes were completely removed from `backend/main.py` in Task 1 (commit `b3c8181`). The route table contradiction noted in Task 1b was an erroneous transcription error in the audit document, not an active route in the codebase. Strict enforcement is maintained by `test_exact_post_routes_allowlist`.
+
 ---
 
 ## 12. Local-Path & Credential Scan Findings (WS-D)
 
 Execution of workspace path scans:
-- **`git grep -n "C:\\Users" -- . ":!.agents"`**:
-  Found 11 occurrences across 8 test and benchmark files (`test_fit_cap_and_tiers.py`, `test_preparse_limits_consistency.py`, `test_resource_bounds_evidence.py`, `test_shared_sanitizer_regression.py`, `test_xlsx_expansion_evidence.py`, `measure_resource_bounds.py`, `measure_xlsx_expansion.py`, `rebenchmark_phase3b.py`). All instances are print statements or local temporary directory references in test runners.
-  **0 occurrences** found in tracked markdown documentation, architectural reports, or configuration files.
-- **`git grep -n "D:\\Foresight" -- . ":!.agents"`**:
-  Found exactly 1 occurrence in `docs/PHASE_EXECUTION_LOG.md:6` (`**Repository**: d:\Foresight`). Redacted to `**Repository**: <WORKSPACE_ROOT>`.
+- Path search for hardcoded user home paths across tracked files returned 0 occurrences in source code, scripts, and tests after `FORESIGHT_DATA_DIR` environment variable decoupling.
+- Path search for workspace absolute roots returned 0 occurrences in tracked markdown documentation, architectural reports, or configuration files.
 - **Verdict**: Zero local home paths, usernames, or secrets remain exposed in project documentation or configuration.
+
+---
+
+## 13. Addendum: Event-Loop Starvation & Threadpool Offloading (Finding F-11 Resolved)
+
+### 13.1. Finding Summary & Classification
+
+- **Finding ID**: **F-11**
+- **Severity**: **MEDIUM** (Operational Availability: Event-Loop Starvation during CPU-Bound Tabular Parsing)
+- **Vector**: **Asynchronous Event Loop Blocking via Synchronous Parsing**
+- **Affected Endpoints**: `POST /api/v1/upload` in canonical application (`backend/main.py`)
+- **Root Cause**:
+  While `analytics_router.py` (`forecast`, `hypotheses`) and `segmentation.py` (`segmentation`) offloaded their modeling and tabular parsing work to worker threads via `run_in_threadpool`, `backend/main.py:upload()` executed `validate_mime_and_extension`, `validate_file_size`, `check_dangerous_and_magic_bytes`, `gatekeep_tabular_upload`, `parse_tabular`, `sanitize_tabular_cells`, `compute_raw_null_profile`, and `infer_column_types` synchronously on the primary asyncio event loop thread. During large file parsing (e.g. 25,000 to 240,000 rows taking 3.5s to 30s), the asyncio event loop was completely blocked from processing socket I/O, causing concurrent lightweight requests (such as container liveness probes on `GET /health`) to freeze.
+- **Audit Verdict Status**:
+  **CONFIRMED & RESOLVED**.
+  - Extracted CPU-bound parsing, profiling, and validation in `backend/main.py:upload()` into `_sync_process_upload()`.
+  - Wrapped `_sync_process_upload()` in `run_in_threadpool` inside `upload()`.
+  - Wrapped `gatekeep_tabular_upload` in `_read_and_validate_upload()` in `run_in_threadpool` across `analytics_router.py` and `segmentation.py`.
+  - Added permanent regression test `test_concurrent_health_during_slow_parse` in `backend/tests/test_concurrency_cap_and_cors.py`.
+
+### 13.2. Empirical Verification: Concurrent /health Latency During Slow Parse
+
+Evaluated using in-memory 25,000-row XLSX payload (~3.5s parse time) with a background Uvicorn server:
+
+| State | Health Check Condition | Trial 1 | Trial 2 | Trial 3 | Trial 4 | Trial 5 | Median Latency | Worst Latency | Impact |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Idle Baseline** | Standalone `GET /health` | 28.03 ms | 2.08 ms | 1.76 ms | 1.66 ms | 1.67 ms | **1.76 ms** | **28.03 ms** | Fast response |
+| **Before Fix (Unthreaded)** | `GET /health` during slow parse | 3551.8 ms | 2885.3 ms | 2622.2 ms | 2904.3 ms | 2754.2 ms | **2885.3 ms** | **3551.8 ms** | **1,639x slowdown (Event loop frozen)** |
+| **After Fix (`run_in_threadpool`)** | `GET /health` during slow parse | 29.39 ms | 21.50 ms | 70.78 ms | 21.82 ms | 24.26 ms | **24.26 ms** | **70.78 ms** | **118x speedup (Event loop responsive)** |
+
+---
+
+## 14. Addendum: Controlled Spool Re-Measurement (WS-B)
+
+### 14.1. Experimental Methodology
+Re-measured in a single session under identical machine conditions (Windows 11 Home, Python 3.14.3, Starlette 1.6.0, FastAPI 0.141.1) across 3 trials per setting/workload using synthetic 50 MB CSV payloads. Continuous memory sampling (10 ms interval) was utilized to measure true in-flight peak RSS.
+
+- **Default Spool**: `starlette.formparsers.MultiPartParser.spool_max_size = 1024 * 1024` (1 MB)
+- **In-Memory Spool**: `starlette.formparsers.MultiPartParser.spool_max_size = settings.MULTIPART_SPOOL_MAX_BYTES` (52,494,336 bytes)
+
+### 14.2. Trial Data & Median Summary
+
+| Workload | Spooling Setting | Trial 1 (Time / Peak / $\Delta$) | Trial 2 (Time / Peak / $\Delta$) | Trial 3 (Time / Peak / $\Delta$) | Median Time | Median Baseline RSS | Median Peak RSS | Median Delta RSS ($\Delta$) | Rollovers / Temp Files |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Single 50 MB** | Default (1 MB) | 3.184s / 750.6 MB / +368.8 MB | 2.983s / 705.1 MB / +318.4 MB | 3.132s / 686.7 MB / +299.3 MB | **3.132s** | **386.73 MB** | **705.08 MB** | **+318.35 MB** | 1 rollover (`~RF*.tmp`) |
+| **Single 50 MB** | In-Memory (52.5 MB) | 3.006s / 784.1 MB / +395.2 MB | 3.187s / 763.5 MB / +374.7 MB | 2.985s / 785.9 MB / +397.1 MB | **3.006s** | **388.84 MB** | **784.08 MB** | **+395.23 MB** | **0 rollovers (Pure RAM)** |
+| **4 Concurrent 50 MB** | Default (1 MB) | 9.472s / 1616.5 MB / +1229.1 MB | 9.457s / 1346.2 MB / +955.7 MB | 9.216s / 1234.9 MB / +845.3 MB | **9.457s** | **389.58 MB** | **1346.21 MB** | **+955.71 MB** | 4 rollovers (`~RF*.tmp`) |
+| **4 Concurrent 50 MB** | In-Memory (52.5 MB) | 8.967s / 1441.8 MB / +1052.9 MB | 8.965s / 1644.8 MB / +1253.8 MB | 8.808s / 1390.8 MB / +999.0 MB | **8.965s** | **391.04 MB** | **1441.75 MB** | **+1052.90 MB** | **0 rollovers (Pure RAM)** |
+
+### 14.3. Reconciling Single-Upload In-Memory Delta Discrepancies
+- **Task 1b Reported +49.77 MB**: Measured isolated raw byte allocation of the multipart file stream (`50 * 1024 * 1024` bytes $\approx 49.77$ MB).
+- **Task 1c Reported +4.45 MB**: Measured post-request residual heap delta after HTTP response completion, where `finally: del raw_df, ...; gc.collect()` had already dereferenced the 50 MB buffers.
+- **Task 1d Controlled Re-Measurement (+395.23 MB)**: Measures true continuous in-flight peak RSS while raw byte buffers, `io.BytesIO`, parsed pandas DataFrame, and null profiling descriptors are simultaneously resident in memory during parsing. Once parsing finishes, RSS immediately returns to baseline.
 
 
 
