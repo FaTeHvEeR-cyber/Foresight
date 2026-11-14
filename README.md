@@ -58,10 +58,15 @@ Foresight is an intelligent forecasting system consisting of multiple predictive
 
 ### 7. Per-Process Upload Concurrency Cap (503 Service Unavailable)
 - **Mechanism**: To prevent RAM exhaustion from multiple simultaneous 50 MB in-memory spools (where 4 concurrent 50 MB uploads consume 842.24 MB point-sampled peak RSS / 1,594.80 MB OS peak, measured 2026-11-14), an ASGI middleware `UploadConcurrencyMiddleware` enforces `MAX_CONCURRENT_UPLOADS: int = 2` slots per worker process.
+- **Measured Footprint & Container Limits**: In benchmark trials post-F-11 (measured 2026-11-14, 50 MB uploads, 376.31 MB idle baseline):
+  - At `cap = 1`: median point-sampled peak RSS is **477.22 MB**; median OS-reported peak RSS is **799.11 MB**.
+  - At `cap = 2`: median point-sampled peak RSS is **577.41 MB**; median OS-reported peak RSS is **1,121.74 MB**.
+  Neither value keeps the process under a 512 MB container on a full 50 MB upload.
+- **Accepted Risk Framing**: Setting the cap at 2 is a deliberate, accepted risk for the current phase, not a validated safety margin. The project is proceeding with `MAX_CONCURRENT_UPLOADS = 2` while Phase 5 decides the hosting target (a larger-RAM host, a lower upload limit, or further optimization are the open options).
 - **Immediate Non-Blocking 503 Rejection**: When slots are saturated, additional upload requests are rejected immediately at the ASGI boundary with `HTTP 503 Service Unavailable`, carrying a `Retry-After: 5` header and `{"detail": "Server is processing maximum concurrent uploads. Please retry shortly."}` without buffering request bodies.
 - **Architecture Rationale (Per-Process vs Shared State)**: The cap is maintained per worker process using a local `asyncio.Semaphore`. In multi-worker deployments (e.g. Gunicorn/Uvicorn with $W$ workers), the effective system-wide concurrency cap is $W \times \text{cap}$. Per-process enforcement was selected because:
   1. It requires zero external dependencies (no Redis, Memcached, or IPC locking), preserving the zero-dependency, local-first offline architecture.
-  2. Memory is partitioned per process; each process manages its own heap bounds within free-tier container limits (e.g. Render 512 MB).
+  2. Memory is partitioned per process without cross-worker IPC locking overhead.
 - **CORS Preservation**: Registered before `CORSMiddleware` (which is outermost), ensuring both 413 and 503 rejections carry `Access-Control-Allow-Origin: http://localhost:3000` headers. Health check endpoints (`/health`, `/api/health`) are exempt from the cap.
 
 ### 8. Event-Loop Starvation Resolution & Threadpool Offloading (Finding F-11 Resolved)
