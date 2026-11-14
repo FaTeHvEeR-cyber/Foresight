@@ -438,6 +438,39 @@ Agent Split:
   - Zero-retention suite: **6 passed** in 101.10s.
   - Frontend suite: **76 passed**, `tsc --noEmit` exited code 0.
 
+---
+
+## 16. Phase 4 Task 1e: Concurrency Cap Re-Measurement Post-F-11, Path Check & README Fix
+
+- **Environment**: OS = Windows 11 Home (win32, x64), Python = 3.14.3, Starlette = 1.6.0, FastAPI = 0.141.1.
+- **Goal**:
+  1. Audit live source file paths for sanitization and tabular parser modules (WS-A).
+  2. Re-measure the concurrency cap matrix (Caps 1, 2, 4, 6 and Cap 2 under 8 requests) post-F-11 threadpool offloading using point-sampled RSS (WS-B).
+  3. Re-measure single-upload 50 MB baseline across 5 trials (WS-C).
+  4. Correct README rationale sentence replacing unsupported "~1.32 GB" figure with empirically measured values (WS-D).
+- **Architectural & Empirical Results**:
+  - **WS-A (Path Check)**:
+    - Confirmed live paths: `backend/src/parsers/sanitization.py` and `backend/src/parsers/tabular_parser.py`.
+  - **WS-B (Concurrency Cap Re-Measurement Post-F-11)**:
+    - Point-sampled RSS method: Windows `GetProcessMemoryInfo` `WorkingSetSize` sampled at well-defined lifecycle points (baseline, each response completion, batch completion, post-GC) alongside kernel-tracked OS peak `PeakWorkingSetSize`.
+    - *Cap = 1 (4 reqs)*: Median Wall = 2.905s, Base RSS = 376.31 MB, Peak Point RSS = 477.22 MB, OS Peak = 799.11 MB, 3x 503 (0.002s), 1x 200.
+    - *Cap = 2 (4 reqs)*: Median Wall = 4.767s, Base RSS = 376.21 MB, Peak Point RSS = 577.41 MB, OS Peak = 1,121.74 MB, 2x 503 (0.0016s), 2x 200.
+    - *Cap = 4 (4 reqs)*: Median Wall = 8.657s, Base RSS = 376.71 MB, Peak Point RSS = 842.24 MB, OS Peak = 1,594.80 MB, 0x 503, 4x 200.
+    - *Cap = 6 (4 reqs)*: Median Wall = 8.344s, Base RSS = 376.39 MB, Peak Point RSS = 900.54 MB, OS Peak = 1,468.88 MB, 0x 503, 4x 200.
+    - *Cap = 2 (8 reqs)*: Median Wall = 4.680s, Base RSS = 376.51 MB, Peak Point RSS = 577.53 MB, OS Peak = 1,001.85 MB, 6x 503 (0.0014s), 2x 200.
+    - *Cap Recommendation*:
+      - Because the ML baseline alone is 376.31 MB, no cap (even Cap = 1 at 477.22 MB / 799.11 MB OS peak) stays below 450 MB under 50 MB loads.
+      - Pinned `MAX_CONCURRENT_UPLOADS = 2` as optimal default (bounds peak point RSS to 577 MB and keeps 5-10 MB customer loads below 410 MB).
+  - **WS-C (Single-Upload Sanity Check)**:
+    - 5 trials of single 50 MB upload: Median Wall = 2.954s, Base RSS = 376.68 MB, Post-Resp Point RSS = 379.82 MB (Delta = +3.29 MB), OS Peak = 799.48 MB.
+  - **WS-D (README Correction)**:
+    - Replaced "~1.32 GB" rationale in Section 7 with measured empirical values (842.24 MB point-sampled peak, 1,594.80 MB OS peak, measured 2026-11-14).
+- **Test Arithmetic**:
+  - Baseline from Task 1d: 464 tests.
+  - Added test (+1): `backend/tests/test_concurrency_cap_and_cors.py:test_production_default_concurrency_cap_pinned_to_empirical_evidence`.
+  - Total: **465 tests**.
+
+
 
 
 

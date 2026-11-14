@@ -57,7 +57,7 @@ Foresight is an intelligent forecasting system consisting of multiple predictive
 - **Dependency Pinning**: Pinned `starlette==1.6.0` and `fastapi==0.141.1` in `backend/requirements.txt` to guarantee deterministic multipart parsing behavior.
 
 ### 7. Per-Process Upload Concurrency Cap (503 Service Unavailable)
-- **Mechanism**: To prevent RAM exhaustion from multiple simultaneous 50 MB in-memory spools (where 4 concurrent uploads consume ~1.32 GB RAM), an ASGI middleware `UploadConcurrencyMiddleware` enforces `MAX_CONCURRENT_UPLOADS: int = 2` slots per worker process.
+- **Mechanism**: To prevent RAM exhaustion from multiple simultaneous 50 MB in-memory spools (where 4 concurrent 50 MB uploads consume 842.24 MB point-sampled peak RSS / 1,594.80 MB OS peak, measured 2026-11-14), an ASGI middleware `UploadConcurrencyMiddleware` enforces `MAX_CONCURRENT_UPLOADS: int = 2` slots per worker process.
 - **Immediate Non-Blocking 503 Rejection**: When slots are saturated, additional upload requests are rejected immediately at the ASGI boundary with `HTTP 503 Service Unavailable`, carrying a `Retry-After: 5` header and `{"detail": "Server is processing maximum concurrent uploads. Please retry shortly."}` without buffering request bodies.
 - **Architecture Rationale (Per-Process vs Shared State)**: The cap is maintained per worker process using a local `asyncio.Semaphore`. In multi-worker deployments (e.g. Gunicorn/Uvicorn with $W$ workers), the effective system-wide concurrency cap is $W \times \text{cap}$. Per-process enforcement was selected because:
   1. It requires zero external dependencies (no Redis, Memcached, or IPC locking), preserving the zero-dependency, local-first offline architecture.
@@ -71,7 +71,7 @@ Foresight is an intelligent forecasting system consisting of multiple predictive
   2. Offloaded execution to worker threads via `await run_in_threadpool(_sync_process_upload, ...)`.
   3. Wrapped `gatekeep_tabular_upload` in `run_in_threadpool` inside `analytics_router.py` and `segmentation.py`.
 - **Verification**: Concurrently tested `GET /health` during active 25,000-row XLSX parsing. Post-fix median health check latency dropped to **24.26 ms** (worst: 70.78 ms)—a **118x speedup** ensuring container orchestrators never fail liveness probes during heavy ingestion.
-- **Controlled In-Flight Spooling Footprint**: Re-measured 3 trials each under controlled single and 4-concurrent 50 MB workloads. Single 50 MB in-memory upload median peak RSS reached 784.08 MB (+395.23 MB delta during active DataFrame + profile generation), returning to baseline immediately post-request. 4 concurrent 50 MB uploads reached 1,441.75 MB peak RSS with 0 temp file rollovers (pure RAM).
+- **Controlled In-Flight Spooling Footprint**: Re-measured 3 trials each under controlled single and 4-concurrent 50 MB workloads. Single 50 MB in-memory upload median peak RSS reached 784.08 MB (+395.23 MB delta during active DataFrame + profile generation), returning to baseline immediately post-request. 4 concurrent 50 MB uploads reached 842.24 MB point-sampled peak RSS (1,594.80 MB OS peak, measured 2026-11-14) with 0 temp file rollovers (pure RAM).
 
 ---
 
@@ -1333,6 +1333,42 @@ A systematic read-only audit of the 10 chart tokens against the backend response
   - Latency suite: **11 passed** in isolation.
   - Zero-retention suite: **6 passed** in isolation.
   - Frontend suite: **76 passed**, `tsc --noEmit` clean exit.
+
+## Update 2026-11-14 (Phase 4 Task 1e: Concurrency Cap Re-Measurement Post-F-11, Path Check & README Fix)
+- **Task**: Phase 4 Task 1e Concurrency Cap Re-Measurement Post-F-11, Sanitization & Tabular Parser Source Path Verification, Single-Upload Baseline, and README Rationale Correction.
+- **Environment**: OS = Windows 11 Home (win32, x64, 10.0.26300), Python = 3.14.3, Starlette = 1.6.0, FastAPI = 0.141.1.
+- **Architectural & Security Remediations**:
+  - **WS-A (Path Check)**:
+    - Confirmed live paths in repository via `git ls-files backend/src`: `backend/src/parsers/sanitization.py` and `backend/src/parsers/tabular_parser.py`.
+    - Confirmed that historical reports and codebase refer exclusively to `src/parsers/`.
+  - **WS-B (Concurrency Cap Re-Measurement Post-F-11)**:
+    - Re-measured 4 concurrent 50 MB uploads across Caps 1, 2, 4, 6 and Cap 2 under 8 attempts (3 trials each, 15 trials total) using point-sampled RSS (Windows `GetProcessMemoryInfo` `WorkingSetSize` sampled at well-defined lifecycle points: baseline, response arrivals, batch end, and post-GC) alongside kernel-tracked OS peak (`PeakWorkingSetSize`).
+    - *Cap = 1 (4 reqs)*: Median Wall = 2.905s, Base RSS = 376.31 MB, Peak Point RSS = 477.22 MB, OS Peak = 799.11 MB, 3x 503 (0.002s), 1x 200.
+    - *Cap = 2 (4 reqs)*: Median Wall = 4.767s, Base RSS = 376.21 MB, Peak Point RSS = 577.41 MB, OS Peak = 1,121.74 MB, 2x 503 (0.0016s), 2x 200.
+    - *Cap = 4 (4 reqs)*: Median Wall = 8.657s, Base RSS = 376.71 MB, Peak Point RSS = 842.24 MB, OS Peak = 1,594.80 MB, 0x 503, 4x 200.
+    - *Cap = 6 (4 reqs)*: Median Wall = 8.344s, Base RSS = 376.39 MB, Peak Point RSS = 900.54 MB, OS Peak = 1,468.88 MB, 0x 503, 4x 200.
+    - *Cap = 2 (8 reqs)*: Median Wall = 4.680s, Base RSS = 376.51 MB, Peak Point RSS = 577.53 MB, OS Peak = 1,001.85 MB, 6x 503 (0.0014s), 2x 200.
+    - *Cap Recommendation & 450 MB Threshold Assessment*:
+      - Because the ML runtime baseline alone is 376.31 MB and an in-flight 50 MB upload requires ~100 MB, **no cap—even Cap = 1 (477.22 MB point peak, 799.11 MB OS peak)—stays below 450 MB under a 50 MB payload**.
+      - However, for normal customer workloads (5–10 MB), Cap = 2 keeps memory comfortably below 410 MB while allowing parallel processing.
+      - Pinned `MAX_CONCURRENT_UPLOADS = 2` as production default in `test_production_default_concurrency_cap_pinned_to_empirical_evidence`.
+  - **WS-C (Single-Upload Sanity Check)**:
+    - Executed 5 trials of single 50 MB upload under identical point-sampling method:
+      - Median Wall Time = **2.954s**
+      - Median Baseline RSS = **376.68 MB**
+      - Median Post-Response Point RSS = **379.82 MB** (Delta = **+3.29 MB**, matching Task 1c's +4.45 MB post-GC residual)
+      - Median OS-Reported Peak RSS = **799.48 MB**
+  - **WS-D (README Correction)**:
+    - Replaced unsupported "~1.32 GB" figure in Section 7 with measured empirical values (842.24 MB point-sampled peak, 1,594.80 MB OS peak, measured 2026-11-14).
+- **Test Arithmetic & Verification**:
+  - Baseline before Task 1e: 464 tests.
+  - Added tests (+1):
+    - `backend/tests/test_concurrency_cap_and_cors.py`: `test_production_default_concurrency_cap_pinned_to_empirical_evidence`.
+  - Suite Total: **465 tests (100% passing when FORESIGHT_DATA_DIR set; 465 passed, 0 failed, 0 skipped)**.
+  - Latency suite: **11 passed** in isolation.
+  - Zero-retention suite: **6 passed** in isolation.
+  - Frontend suite: **76 passed**, `tsc --noEmit` clean exit.
+
 
 
 
